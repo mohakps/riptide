@@ -1,0 +1,116 @@
+diff --git a/src/riptide/__init__.py b/src/riptide/__init__.py
+index e50d598..08e01a0 100644
+--- a/src/riptide/__init__.py
++++ b/src/riptide/__init__.py
+@@ -1,4 +1,23 @@
+ """Riptide: direct, encrypted PC-to-PC file transfer in the terminal."""
+ 
+-__version__ = "0.4.0"
++from pathlib import Path
++import tomllib
++
++
++def _load_version() -> str:
++    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
++    if pyproject_path.exists():
++        try:
++            data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
++            return str(data.get("project", {}).get("version", "0.0.0"))
++        except Exception:
++            pass
++    try:
++        from importlib.metadata import version
++        return version("riptide")
++    except Exception:
++        return "0.0.0"
++
++
++__version__ = _load_version()
+ __all__ = ["__version__"]
+diff --git a/src/riptide/core/file_select.py b/src/riptide/core/file_select.py
+index 66cc110..795c9dd 100644
+--- a/src/riptide/core/file_select.py
++++ b/src/riptide/core/file_select.py
+@@ -5,7 +5,7 @@ path text into the input, so both methods feed the same Selected list.
+ This module is deliberately stdlib-only so it is easy to test.
+ """
+ from __future__ import annotations
+-
++from datetime import datetime
+ import re
+ import shlex
+ from pathlib import Path
+@@ -30,6 +30,17 @@ def total_size(paths: list[Path]) -> int:
+             pass
+     return total
+ 
++def format_mtime(mtime: float) -> str:
++    """Format modification timestamp as strictly dd-mm-yyyy hh:mm am/pm in lowercase."""
++    dt = datetime.fromtimestamp(mtime)
++    return dt.strftime("%d-%m-%Y %I:%M %p").lower()
++
++
++def format_file_row(path: Path) -> tuple[str, str, str]:
++    """Return (filename, size_str, mtime_str) for displaying in file tables."""
++    stat = path.stat()
++    return path.name, format_bytes(stat.st_size), format_mtime(stat.st_mtime)
++
+ 
+ def _split_pasted(text: str) -> list[str]:
+     """Split pasted text, honouring quotes, Windows paths, and spaces."""
+diff --git a/tests/test_file_select.py b/tests/test_file_select.py
+index bd62d4b..fb97f66 100644
+--- a/tests/test_file_select.py
++++ b/tests/test_file_select.py
+@@ -3,7 +3,15 @@ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ 
+-from riptide.core.file_select import add_to_selection, complete, parse_dropped_text, total_size
++from riptide import __version__
++from riptide.core.file_select import (
++    add_to_selection,
++    complete,
++    format_file_row,
++    format_mtime,
++    parse_dropped_text,
++    total_size,
++)
+ 
+ 
+ def test_parse_typed_name(tmp_path):
+@@ -39,3 +47,34 @@ def test_complete(tmp_path):
+     assert complete("de", tmp_path) == ["demo.mp4"]
+     assert complete("n", tmp_path) == ["notes.txt"]
+     assert complete("zzz", tmp_path) == []
++
++def test_dynamic_version_matches_pyproject():
++    import tomllib
++    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
++    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
++    assert __version__ == data["project"]["version"]
++
++
++def test_format_mtime_exact_format():
++    # Example: 2026-10-31 14:15:00 UTC/local
++    from datetime import datetime
++    dt = datetime(2026, 10, 31, 14, 15, 0)
++    ts = dt.timestamp()
++    assert format_mtime(ts) == "31-10-2026 02:15 pm"
++
++    dt_am = datetime(2026, 1, 5, 9, 7, 0)
++    assert format_mtime(dt_am.timestamp()) == "05-01-2026 09:07 am"
++
++
++def test_format_file_row(tmp_path):
++    f = tmp_path / "hello.txt"
++    f.write_text("hello world")
++    from datetime import datetime
++    import os
++    dt = datetime(2026, 5, 12, 16, 30, 0)
++    os.utime(f, (dt.timestamp(), dt.timestamp()))
++
++    name, size_str, mtime_str = format_file_row(f)
++    assert name == "hello.txt"
++    assert size_str == "11 B"
++    assert mtime_str == "12-05-2026 04:30 pm"
