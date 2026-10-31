@@ -1,5 +1,5 @@
 import pytest
-from textual.app import App
+from riptide.app import RiptideApp
 from riptide.screens.menu import MenuScreen
 from riptide.screens.create import CreateScreen
 from riptide.screens.join import JoinScreen
@@ -7,9 +7,9 @@ from riptide.screens.setup import SetupScreen
 from riptide.theme import TAGLINES
 
 
-class SmokeApp(App):
+class SmokeApp(RiptideApp):
     def on_mount(self):
-        self.push_screen(MenuScreen())
+        super().on_mount()
 
 
 @pytest.mark.asyncio

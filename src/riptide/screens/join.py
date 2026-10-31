@@ -121,8 +121,10 @@ class JoinScreen(Screen):
             from .session_screen import SessionScreen
             self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Failed: {exc}")
-
+            try:
+                self.app.call_from_thread(self._set_status, f"Failed: {exc}")
+            except Exception:
+                pass
     async def on_key(self, event) -> None:
         if event.key == "escape":
             if self._listener is not None:

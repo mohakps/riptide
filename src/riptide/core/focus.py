@@ -57,6 +57,13 @@ def move_focus(screen, direction: int) -> bool:
 
 def handle_arrow_key(screen, key: str) -> bool:
     """Handle an Up/Down key for a screen. Return True if handled."""
+    try:
+        from textual.widgets import OptionList, ListView
+        focused = getattr(screen, "focused", None)
+        if isinstance(focused, (OptionList, ListView)):
+            return False
+    except Exception:
+        pass
     if key == "down":
         return move_focus(screen, +1)
     if key == "up":

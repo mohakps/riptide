@@ -49,12 +49,16 @@ class MenuScreen(Screen):
             pass
 
     def on_mount(self) -> None:
-        focus_first(self)
+        try:
+            self.query_one("#menu_list", OptionList).focus()
+        except Exception:
+            focus_first(self)
 
     async def on_key(self, event) -> None:
         if event.key in ("escape", "q"):
             self.app.exit()
             event.stop()
             return
-        if handle_arrow_key(self, event.key):
-            event.stop()
+        if event.key in ("down", "up") and not isinstance(self.focused, OptionList):
+            if handle_arrow_key(self, event.key):
+                event.stop()

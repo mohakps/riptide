@@ -1,4 +1,74 @@
 """Theme constants. Pure terminal transparency, coral accent, muted metadata."""
+from __future__ import annotations
+
+import textual.renderables.blank as _blank_mod
+from rich.style import Style as _RichStyle
+from textual.color import Color as _Color
+import textual.style as _style_mod
+import textual.filter as _filter_mod
+
+# Patch Textual's Blank visual to emit Style() with no background color for transparent/alpha=0
+_orig_blank_init = _blank_mod.Blank.__init__
+def _transparent_blank_init(self, color: _Color | str = "transparent") -> None:
+    c = _Color.parse(color) if isinstance(color, str) else color
+    if c.is_transparent or getattr(c, "a", 1) == 0:
+        self._rich_style = _RichStyle()
+    else:
+        _orig_blank_init(self, color)
+_blank_mod.Blank.__init__ = _transparent_blank_init
+
+# Patch Textual's Style.rich_style and rich_style_with_offset so transparent background has bgcolor=None
+_orig_rich_style_func = _style_mod.Style.rich_style.func
+def _patched_rich_style(self) -> _RichStyle:
+    rs = _orig_rich_style_func(self)
+    bg = getattr(self, "background", None)
+    if bg is not None and (getattr(bg, "a", 1) == 0 or getattr(bg, "is_transparent", False)):
+        return _RichStyle(
+            color=rs.color,
+            bgcolor=None,
+            bold=rs.bold,
+            dim=rs.dim,
+            italic=rs.italic,
+            underline=rs.underline,
+            underline2=rs.underline2,
+            reverse=rs.reverse,
+            strike=rs.strike,
+            blink=rs.blink,
+            link=rs.link,
+            meta=rs.meta,
+        )
+    return rs
+_style_mod.Style.rich_style = property(_patched_rich_style)
+
+_orig_rich_style_with_offset = _style_mod.Style.rich_style_with_offset
+def _patched_rich_style_with_offset(self, x: int, y: int) -> _RichStyle:
+    rs = _orig_rich_style_with_offset(self, x, y)
+    bg = getattr(self, "background", None)
+    if bg is not None and (getattr(bg, "a", 1) == 0 or getattr(bg, "is_transparent", False)):
+        return _RichStyle(
+            color=rs.color,
+            bgcolor=None,
+            bold=rs.bold,
+            dim=rs.dim,
+            italic=rs.italic,
+            underline=rs.underline,
+            underline2=rs.underline2,
+            reverse=rs.reverse,
+            strike=rs.strike,
+            blink=rs.blink,
+            link=rs.link,
+            meta=rs.meta,
+        )
+    return rs
+_style_mod.Style.rich_style_with_offset = _patched_rich_style_with_offset
+
+# Guard monochrome filter against None styles
+_orig_monochrome_style = _filter_mod.monochrome_style
+def _patched_monochrome_style(style: _RichStyle | None) -> _RichStyle:
+    if style is None:
+        return _RichStyle()
+    return _orig_monochrome_style(style)
+_filter_mod.monochrome_style = _patched_monochrome_style
 
 BACKGROUND = "transparent"
 SURFACE = "transparent"
@@ -8,7 +78,6 @@ DIM = "#71717A"
 SUCCESS = "#78DC8C"
 WARNING = "#FFD166"
 ERROR = "#FF6B6B"
-
 HEADER_BANNER = """\
 ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
 ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -29,8 +98,8 @@ TAGLINES = {
 }
 
 CSS = """
-Screen {
-    background: transparent;
+App, Screen {
+    background: transparent !important;
     color: #E8E8E8;
     layout: vertical;
     padding: 1 2;

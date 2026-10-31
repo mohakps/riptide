@@ -14,11 +14,15 @@ class RiptideApp(App):
     CSS = CSS
     TITLE = "riptide"
 
+    def render(self):
+        from textual.renderables.blank import Blank
+        return Blank("transparent")
+
     def on_mount(self) -> None:
+        self.styles.background = "transparent"
         from .screens.menu import MenuScreen
 
         self.push_screen(MenuScreen())
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
