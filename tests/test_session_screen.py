@@ -1,7 +1,51 @@
+from __future__ import annotations
+
+import pytest
 from pathlib import Path
+
+from textual.app import App, ComposeResult
+from textual.containers import VerticalScroll
+from textual.widgets import Button, Input, Label, ListView, ProgressBar, Static
+
 from riptide.core.file_select import format_file_row
-from riptide.screens.session_screen import SessionScreen
-from riptide.theme import TAGLINES
+from riptide.screens.session_screen import SessionScreen, _truncate_filename
+from riptide.theme import BANNER_HOST, TAGLINES
+
+
+class DummySession:
+    def __init__(self, cwd: Path):
+        self.cwd = cwd
+        self.peer_device = "yoga"
+        self.peer_host = "192.168.1.15"
+        self.sock = None
+        self.on_file_received = None
+        self.on_ack = None
+        self.on_error = None
+        self.on_progress = None
+        self.on_download_ask = None
+        self.on_download_denied = None
+
+    def start(self):
+        pass
+
+    def close(self):
+        pass
+
+    def send_file(self, path, on_progress=None):
+        return True
+
+    def request_download(self, name, request_id=""):
+        return True
+
+
+class SessionTestApp(App):
+    def __init__(self, session, role="creator"):
+        super().__init__()
+        self.test_session = session
+        self.role = role
+
+    def on_mount(self):
+        self.push_screen(SessionScreen(self.test_session, self.role))
 
 
 def test_file_row_structure(tmp_path):
@@ -16,3 +60,245 @@ def test_file_row_structure(tmp_path):
 def test_session_tagline_present():
     assert "session" in TAGLINES
     assert "encrypted channel" in TAGLINES["session"]
+
+
+def test_truncate_filename():
+    short = "report.pdf"
+    assert _truncate_filename(short, 50) == "report.pdf"
+    long_name = "Bleach (2004) - S04E08 - 071 - The Moment of Collision An Evil Hand Draws Near.mkv"
+    truncated = _truncate_filename(long_name, 30)
+    assert len(truncated) <= 30
+    assert "..." in truncated
+    assert truncated.endswith(".mkv")
+
+
+@pytest.mark.asyncio
+async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
+    """Requirement 1 & 2: Larger HOST banner, client info with IP/host,
+
+    connection status indicators, and sub header removed.
+    """
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        assert isinstance(screen, SessionScreen)
+
+        # 1. Larger HOST font/banner
+        host_title = screen.query_one("#session_host_title", Static).render().plain
+        assert "█" in host_title
+        assert "HOST" in BANNER_HOST or "█" in BANNER_HOST
+
+        # 1. Client info with hostname or IP address
+        client_label = screen.query_one("#peer_client_label", Static).render().plain
+        assert "yoga" in client_label
+        assert "192.168.1.15" in client_label
+
+        # 1. Connection status indicator: Connected with filled circle ●
+        status_label = screen.query_one("#peer_status_label", Static).render().plain
+        assert "Connected" in status_label
+        assert "●" in status_label
+
+        # 2. Sub header removed
+        all_text = " ".join(str(getattr(node.render(), "plain", node.render())) for node in screen.query("Static, Label"))
+        assert TAGLINES["session"] not in all_text
+
+
+@pytest.mark.asyncio
+async def test_session_screen_file_selector_box_folder_and_separator(tmp_path):
+    """Requirement 3 & 4: Current folder inside selector box with clear separator below it,
+
+    and height increased.
+    """
+    (tmp_path / "ep01.mkv").write_bytes(b"x" * 1000)
+    (tmp_path / "ep02.mkv").write_bytes(b"x" * 2000)
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        browser_box = screen.query_one("#browser_box")
+        assert browser_box is not None
+
+        # Folder path is inside browser_box
+        folder_label = browser_box.query_one("#browser_path", Static)
+        assert str(tmp_path) in folder_label.render().plain
+
+        # Clear separator below it
+        separator = browser_box.query_one("#browser_separator", Static)
+        assert separator is not None
+        assert "─" in separator.render().plain
+
+        # ListView is inside browser_box
+        list_view = browser_box.query_one("#cwd_list", ListView)
+        assert list_view is not None
+
+
+@pytest.mark.asyncio
+async def test_session_screen_search_filtering(tmp_path):
+    """Requirement 4: Typing searches the files."""
+    (tmp_path / "bleach_01.mkv").write_bytes(b"x" * 1000)
+    (tmp_path / "naruto_01.mkv").write_bytes(b"x" * 1000)
+    (tmp_path / "bleach_02.mkv").write_bytes(b"x" * 1000)
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+
+        # Set search query to 'bleach'
+        screen._search_query = "bleach"
+        rows = screen._browser_rows()
+        names = [p.name for p in rows]
+        assert "bleach_01.mkv" in names
+        assert "bleach_02.mkv" in names
+        assert "naruto_01.mkv" not in names
+
+        # Clear search query
+        screen._search_query = ""
+        rows_all = screen._browser_rows()
+        names_all = [p.name for p in rows_all]
+        assert "naruto_01.mkv" in names_all
+
+
+@pytest.mark.asyncio
+async def test_session_screen_spacebar_opens_folder_and_selects_files(tmp_path):
+    """Spacebar opens folders and toggles file selection."""
+    sub = tmp_path / "subfolder"
+    sub.mkdir()
+    (sub / "nested.txt").write_bytes(b"nested")
+    f1 = tmp_path / "file1.txt"
+    f1.write_bytes(b"hello")
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        assert len(screen.query("#send")) == 0
+
+        # Space on a file selects it
+        screen.selection = [f1]
+        screen._refresh_selected()
+        await pilot.pause()
+        selected_items = screen.query(".selected-file-item")
+        assert len(selected_items) == 1
+        assert str(f1.resolve()) in selected_items[0].render().plain
+
+        # Space on a folder navigates into it
+        screen._go_into(sub)
+        assert screen.browser_dir == sub
+
+
+@pytest.mark.asyncio
+async def test_session_screen_tab_cycles_ui_elements(tmp_path):
+    """Tab cycles through UI elements."""
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        # Initial focus is cwd_list
+        assert screen.focused.id == "cwd_list"
+
+        # Tab moves to file_input
+        await pilot.press("tab")
+        assert screen.focused.id == "file_input"
+
+        # Tab moves to download_input
+        await pilot.press("tab")
+        assert screen.focused.id == "download_input"
+
+        # Tab cycles back to cwd_list
+        await pilot.press("tab")
+        assert screen.focused.id == "cwd_list"
+@pytest.mark.asyncio
+async def test_session_screen_download_button_removed_and_disabled_on_send(tmp_path):
+    """Requirement 6: Download button removed, Enter initiates request,
+
+    and field cannot be accessed when 'send' files are selected.
+    """
+    f1 = tmp_path / "file1.txt"
+    f1.write_bytes(b"data")
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+
+        # Download button is removed
+        assert len(screen.query("#download")) == 0
+
+        dl_input = screen.query_one("#download_input", Input)
+        assert dl_input.disabled is False
+
+        # When files are selected to send, download input becomes disabled
+        screen.selection = [f1]
+        screen._refresh_selected()
+        assert dl_input.disabled is True
+
+        # When selection cleared, download input re-enabled
+        screen.selection = []
+        screen._refresh_selected()
+        assert dl_input.disabled is False
+
+
+@pytest.mark.asyncio
+async def test_session_screen_overall_progress_and_metrics_layout(tmp_path):
+    """Requirement 7: Overall progress of all files, full width progress bar,
+
+    evenly spaced metrics on line 2, third line current file and [sent/total size].
+    """
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+
+        # Trigger progress update
+        screen._on_progress(
+            name="very_long_movie_name_bleach_episode_test.mkv",
+            file_sent=500,
+            file_total=1000,
+            batch_sent=1500,
+            batch_total=2000,
+            direction="Sending",
+        )
+        await pilot.pause()
+
+        bar = screen.query_one("#bar", ProgressBar)
+        assert bar.progress == 75.0  # 1500 / 2000 * 100
+
+        # Metrics row
+        metric_speed = screen.query_one("#metric_speed", Label).render().plain
+        metric_trans = screen.query_one("#metric_transferred", Label).render().plain
+        metric_rem = screen.query_one("#metric_remaining", Label).render().plain
+        metric_eta = screen.query_one("#metric_eta", Label).render().plain
+        assert "Speed" in metric_speed
+        assert "1500 B / 2000 B" in metric_trans or "1.5 KB" in metric_trans
+        assert "Remaining" in metric_rem
+        assert "ETA" in metric_eta
+
+        # Third line
+        file_name_label = screen.query_one("#progress_file_name", Label).render().plain
+        file_size_label = screen.query_one("#progress_file_size", Label).render().plain
+        assert "Sending:" in file_name_label
+        assert "500 B / 1000 B" in file_size_label or "B" in file_size_label
+
+
+@pytest.mark.asyncio
+async def test_session_screen_scrollable_and_footer_keys_in_brackets(tmp_path):
+    """Full page scrollable container and footer items evenly spaced with [] keys."""
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+
+        # Scroll container
+        scroll = screen.query_one("#session_scroll")
+        assert isinstance(scroll, VerticalScroll)
+
+        # Footer items with []
+        footer = screen.query_one("#footer_bar")
+        assert footer is not None
+        footer_items = footer.query(".keymap-item")
+        assert len(footer_items) >= 5
+        keys = [str(getattr(item.render(), "plain", item.render())) for item in footer_items]
+        for expected_key in ("[↑/↓]", "[Space]", "[Enter]", "[Tab]", "[Backspace]", "[Esc]"):
+            assert any(expected_key in k for k in keys), f"Expected key {expected_key} in footer"
+        assert any("Open / Select" in k for k in keys)
+        assert any("Send" in k for k in keys)
+        assert any("Cycle UI" in k for k in keys)

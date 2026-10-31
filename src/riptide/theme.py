@@ -78,6 +78,16 @@ DIM = "#71717A"
 SUCCESS = "#78DC8C"
 WARNING = "#FFD166"
 ERROR = "#FF6B6B"
+BANNER_HOST = """\
+█  █  ███   ███  █████
+█▄▄█ █   █ ▀▀█     █  
+█  █  ███  ███     █  \
+"""
+BANNER_CLIENT = """\
+████ █    █ █████ █  █ █████
+█    █    █ █▄▄   ██▄█   █  
+████ ████ █ █▄▄▄  █  █   █  \
+"""
 HEADER_BANNER = """\
 ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
 ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -257,7 +267,7 @@ ListView {
     background: transparent;
     border: round #3F3F46;
     padding: 0 1;
-    height: 10;
+    height: 16;
 }
 ListView:focus {
     border: round #FF6B6B;
@@ -291,10 +301,12 @@ ListItem.selected .file-size,
 ListItem.selected .file-mtime {
     color: #71717A;
 }
+ListItem.--highlight,
+ListItem.--highlight Label,
 ListItem.--highlight .file-name,
 ListItem.--highlight .file-size,
 ListItem.--highlight .file-mtime {
-    color: #FFFFFF;
+    color: #FFFFFF !important;
     text-style: bold;
 }
 .file-size {
@@ -311,7 +323,7 @@ ListItem.--highlight .file-mtime {
     width: 100%;
     height: 1;
     layout: horizontal;
-    padding: 0 2;
+    padding: 0 1;
     color: #71717A;
     text-style: bold;
 }
@@ -331,5 +343,177 @@ ListItem.--highlight .file-mtime {
     text-align: right;
     color: #71717A;
     text-style: bold;
+}
+
+/* Redesigned Session Screen Styles */
+#session_scroll {
+    height: 1fr;
+    overflow-y: auto;
+    padding: 0;
+}
+#session_header_row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin: 0 0 1 0;
+}
+#session_host_title {
+    width: auto;
+    color: #FF6B6B;
+    text-style: bold;
+}
+#session_peer_info {
+    width: 1fr;
+    layout: vertical;
+}
+#peer_client_label {
+    width: 100%;
+    text-align: right;
+    color: #E8E8E8;
+    text-style: bold;
+}
+#peer_status_label {
+    width: 100%;
+    text-align: right;
+    margin: 0;
+}
+
+#browser_box {
+    border: round #3F3F46;
+    background: transparent;
+    padding: 0 1;
+    margin: 0 0 1 0;
+    height: auto;
+}
+#browser_box:focus-within {
+    border: round #FF6B6B;
+}
+#browser_header_row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    padding: 0 1;
+}
+#browser_path {
+    width: 1fr;
+    color: #E8E8E8;
+    text-style: bold;
+}
+#browser_search_indicator {
+    width: auto;
+    color: #FFD166;
+    text-style: bold;
+}
+#browser_separator {
+    width: 100%;
+    height: 1;
+    color: #3F3F46;
+}
+#browser_box ListView#cwd_list {
+    border: none;
+    padding: 0;
+    height: 16;
+}
+#browser_box ListView#cwd_list:focus {
+    border: none;
+}
+
+#selected_files_section {
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+    background: transparent;
+}
+#selected_header {
+    width: 100%;
+    margin: 0;
+}
+#selected_files_list {
+    width: 100%;
+    height: auto;
+    margin: 0;
+}
+.selected-file-item {
+    width: 100%;
+    color: #FF6B6B;
+}
+
+#download_composer.disabled {
+    opacity: 0.35;
+}
+#download_composer.disabled Input {
+    border: round #27272A;
+    color: #52525B;
+}
+#download_composer.disabled .composer-label,
+#download_composer.disabled .composer-hint {
+    color: #52525B;
+}
+
+#progress_section {
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+}
+#progress_section ProgressBar#bar {
+    width: 100%;
+    margin: 0;
+}
+#progress_metrics_row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    margin: 0;
+}
+.progress-metric {
+    width: 1fr;
+    text-align: center;
+    color: #A1A1AA;
+}
+.progress-metric-left {
+    width: 1fr;
+    text-align: left;
+    color: #A1A1AA;
+}
+.progress-metric-right {
+    width: 1fr;
+    text-align: right;
+    color: #A1A1AA;
+}
+#progress_file_row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    margin: 0;
+}
+#progress_file_name {
+    width: 1fr;
+    color: #E8E8E8;
+    text-style: bold;
+}
+#progress_file_size {
+    width: auto;
+    text-align: right;
+    color: #71717A;
+}
+
+#footer_bar {
+    dock: bottom;
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    background: transparent;
+    padding: 0 1;
+}
+.keymap-item {
+    width: 1fr;
+    text-align: center;
+    color: #71717A;
+}
+.keymap-left {
+    text-align: left;
+}
+.keymap-right {
+    text-align: right;
 }
 """

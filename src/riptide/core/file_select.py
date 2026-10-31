@@ -124,11 +124,9 @@ def complete(prefix: str, cwd: Path) -> list[str]:
         directory = Path(prefix).expanduser()
         if re.match(r"^[A-Za-z]:[\\/]", prefix):
             directory = Path(prefix)
-        stem = ""
-        base = prefix
         if not directory.is_dir():
             return []
-        return [f"{base}{e.name}{'/' if e.is_dir() else ''}"
+        return [f"{str(directory / e.name)}{sep if e.is_dir() else ''}"
                 for e in sorted(directory.iterdir(), key=lambda p: p.name.lower())]
     raw = Path(prefix)
     is_win_abs = bool(re.match(r"^[A-Za-z]:[\\/]", prefix))
