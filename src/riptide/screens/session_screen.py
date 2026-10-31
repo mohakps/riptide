@@ -32,12 +32,9 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBa
 
 from ..core.file_select import (
     add_to_selection,
-    common_prefix,
-    complete,
     format_browser_row,
     format_bytes,
     list_browser_entries,
-    parse_dropped_text,
     total_size,
 )
 from ..core.focus import focus_first, handle_arrow_key
@@ -136,7 +133,7 @@ class SessionScreen(Screen):
         rows.extend(all_entries)
         return rows
 
-    def _refresh_browser(self, keep_index: int | None = None) -> None:
+    def _refresh_browser(self, keep_index: int | None = None, auto_first: bool = False) -> None:
         try:
             lst = self.query_one("#cwd_list", ListView)
         except Exception:
@@ -149,6 +146,16 @@ class SessionScreen(Screen):
                 index = 0
         selected = set(self.selection)
         rows = self._browser_rows()
+        # Auto-select the first real file/folder on directory change,
+        # not the ".." parent row. When searching, there is no parent
+        # row, so the first filtered row is index 0.
+        if auto_first and rows:
+            if self._search_query:
+                index = 0
+            elif rows[0] == self.browser_dir.parent and len(rows) > 1:
+                index = 1
+            else:
+                index = 0
         lst.clear()
         for path in rows:
             is_parent = path == self.browser_dir.parent and path not in list_browser_entries(self.browser_dir)
@@ -176,33 +183,38 @@ class SessionScreen(Screen):
     def _update_folder_header(self) -> None:
         try:
             self.query_one("#browser_path", Static).update(f"📁 Folder: {self.browser_dir}")
-            search_text = (
-                f"[Search: [bold #FFFFFF]{self._search_query}[/]]  [dim](Esc to clear)[/]"
-                if self._search_query
-                else ""
+            # Find label is always visible at the right corner of the
+            # file-selection box header, with the typed text in white
+            # and a blinking cursor, even when the query is empty.
+            cursor = "▌" if getattr(self, "_find_cursor_visible", True) else " "
+            self.query_one("#browser_search_indicator", Static).update(
+                f"[#71717A]Find:[/] [bold #FFFFFF]{self._search_query}[/][bold #FF6B6B]{cursor}[/]"
             )
-            self.query_one("#browser_search_indicator", Static).update(search_text)
         except Exception:
             pass
+
+    def _toggle_find_cursor(self) -> None:
+        self._find_cursor_visible = not getattr(self, "_find_cursor_visible", True)
+        self._update_folder_header()
 
     def _go_up(self) -> None:
         if self.browser_dir.parent != self.browser_dir:
             self.browser_dir = self.browser_dir.parent
             self._search_query = ""
-            self._refresh_browser(keep_index=0)
+            self._refresh_browser(auto_first=True)
 
     def _go_into(self, path: Path) -> None:
         if path.is_dir():
             self.browser_dir = path
             self._search_query = ""
-            self._refresh_browser(keep_index=0)
+            self._refresh_browser(auto_first=True)
 
     # -- compose ------------------------------------------------------
     def compose(self) -> ComposeResult:
         banner = BANNER_HOST if self.role in ("creator", "host") else BANNER_CLIENT
         yield VerticalScroll(
             Horizontal(
-                Static(banner, id="session_host_title"),
+                Static(banner, classes="session-header-text", id="session_host_title"),
                 Vertical(
                     Static(self._format_client_info(), id="peer_client_label"),
                     Static(self._format_status_indicator(), id="peer_status_label"),
@@ -210,11 +222,10 @@ class SessionScreen(Screen):
                 ),
                 id="session_header_row",
             ),
-            Static("Status: Connected", id="status"),
             Vertical(
                 Horizontal(
                     Static(f"📁 Folder: {self.browser_dir}", id="browser_path"),
-                    Static("", id="browser_search_indicator"),
+                    Static("Find: ▌", id="browser_search_indicator"),
                     id="browser_header_row",
                 ),
                 Static("─" * 200, id="browser_separator"),
@@ -225,27 +236,12 @@ class SessionScreen(Screen):
                     classes="file-header-row",
                 ),
                 ListView(id="cwd_list"),
-                Static(
-                    "Space opens folder / selects file  •  Enter sends files  •  Backspace goes up  •  Tab cycles UI  •  Type to search",
-                    classes="dim",
-                    id="browser_hint",
-                ),
                 id="browser_box",
             ),
             Vertical(
                 Static(self._format_selected_header(), id="selected_header"),
                 Vertical(id="selected_files_list"),
                 id="selected_files_section",
-            ),
-            Vertical(
-                Static("SEND FILE  ·  local path", classes="composer-label"),
-                Input(
-                    placeholder="Type an absolute path, e.g. /home/user/notes.pdf, or a name in this folder…",
-                    id="file_input",
-                ),
-                Static("Enter adds to selection  •  Tab cycles UI elements", classes="composer-hint"),
-                classes="composer",
-                id="send_composer",
             ),
             Vertical(
                 Static("DOWNLOAD FROM PEER  ·  peer path", classes="composer-label"),
@@ -283,8 +279,9 @@ class SessionScreen(Screen):
             Label(r"[bold #E8E8E8]\[↑/↓][/] [dim]Move[/]", classes="keymap-item keymap-left"),
             Label(r"[bold #E8E8E8]\[Space][/] [dim]Open / Select[/]", classes="keymap-item"),
             Label(r"[bold #E8E8E8]\[Enter][/] [dim]Send[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[0][/] [dim]Deselect all[/]", classes="keymap-item"),
             Label(r"[bold #E8E8E8]\[Tab][/] [dim]Cycle UI[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Backspace][/] [dim]Up folder[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Backspace][/] [dim]Erase Find / Up[/]", classes="keymap-item"),
             Label(r"[bold #E8E8E8]\[Esc][/] [dim]Leave[/]", classes="keymap-item keymap-right"),
             id="footer_bar",
         )
@@ -301,7 +298,12 @@ class SessionScreen(Screen):
         self.session.on_download_ask = lambda name, rid: self.app.call_from_thread(self._on_download_ask, name, rid)
         self.session.on_download_denied = lambda name, rid: self.app.call_from_thread(self._set_status, f"Peer denied download of {name}")
         self.session.start()
-        self._refresh_browser(keep_index=0)
+        self._find_cursor_visible = True
+        try:
+            self.set_interval(0.5, self._toggle_find_cursor)
+        except Exception:
+            pass
+        self._refresh_browser(auto_first=True)
         self._refresh_selected()
         try:
             self._approve_btn = self.query_one("#approve_download", Button)
@@ -365,6 +367,12 @@ class SessionScreen(Screen):
 
     # -- status / progress --------------------------------------------
     def _set_status(self, text: str) -> None:
+        # The Status subheader was removed from the page. Connection
+        # state is still shown in the header (Connected ● / etc.),
+        # and transfer progress is shown in the progress section.
+        # Keep the last message in memory for debugging/tests, and
+        # do not crash if the old #status widget is gone.
+        self._last_status = text
         try:
             self.query_one("#status", Static).update(f"Status: {text}")
         except Exception:
@@ -451,32 +459,12 @@ class SessionScreen(Screen):
             pass
 
     # -- input handling ------------------------------------------------
-    def _apply_tab_completion(self, inp: Input) -> None:
-        value = inp.value
-        candidates = complete(value, self.browser_dir)
-        if not candidates:
-            self._set_status("No completion found.")
-            return
-        if len(candidates) == 1:
-            inp.value = candidates[0]
-            return
-        prefix = common_prefix(candidates)
-        if prefix and prefix != value and len(prefix) > len(value):
-            inp.value = prefix
-            return
-        self._set_status(f"Completions: {', '.join(candidates[:10])}")
-
+    # The send file input field was removed: files are now selected
+    # only from the file manager box, with Space, and sent with Enter.
+    # Tab completion for absolute paths remains in core/file_select
+    # for any future input, but is not wired to a send input here.
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "file_input":
-            text = event.value.strip()
-            event.input.value = ""
-            if text:
-                add_to_selection(self.selection, parse_dropped_text(text, self.browser_dir))
-                self._refresh_selected()
-                self._refresh_browser()
-            elif self.selection:
-                self._send()
-        elif event.input.id == "download_input":
+        if event.input.id == "download_input":
             # Requirement 6: Enter key initiates the request
             name = event.value.strip()
             event.input.value = ""
@@ -560,6 +548,15 @@ class SessionScreen(Screen):
             return
 
         focused = self.focused
+
+        # 0: deselect all files. Not when typing in an input, where
+        # 0 is a digit in the path.
+        if event.key == "0" and not isinstance(focused, Input):
+            event.stop()
+            self.selection = []
+            self._refresh_selected()
+            self._refresh_browser()
+            return
 
         # Spacebar: open folders (or parent ..) or select/toggle files
         if event.key == "space" and isinstance(focused, ListView):

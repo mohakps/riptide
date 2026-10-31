@@ -74,9 +74,8 @@ def test_truncate_filename():
 
 @pytest.mark.asyncio
 async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
-    """Requirement 1 & 2: Larger HOST banner, client info with IP/host,
-
-    connection status indicators, and sub header removed.
+    """Header is plain terminal font (HOST, not block art), client
+    info with IP/host, connection status, and Status subheader removed.
     """
     session = DummySession(tmp_path)
     app = SessionTestApp(session, role="creator")
@@ -84,10 +83,16 @@ async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
         screen = app.screen
         assert isinstance(screen, SessionScreen)
 
-        # 1. Larger HOST font/banner
         host_title = screen.query_one("#session_host_title", Static).render().plain
-        assert "█" in host_title
-        assert "HOST" in BANNER_HOST or "█" in BANNER_HOST
+        assert "HOST" in host_title
+        assert "█" not in host_title
+        assert "HOST" in BANNER_HOST
+        # Status subheader widget is gone.
+        assert len(screen.query("#status")) == 0
+        # File-selection box footer inside the box is gone.
+        assert len(screen.query("#browser_hint")) == 0
+        # Send file input field is gone.
+        assert len(screen.query("#file_input")) == 0
 
         # 1. Client info with hostname or IP address
         client_label = screen.query_one("#peer_client_label", Static).render().plain
@@ -188,7 +193,7 @@ async def test_session_screen_spacebar_opens_folder_and_selects_files(tmp_path):
 
 @pytest.mark.asyncio
 async def test_session_screen_tab_cycles_ui_elements(tmp_path):
-    """Tab cycles through UI elements."""
+    """Tab cycles through UI elements, with no send input anymore."""
     session = DummySession(tmp_path)
     app = SessionTestApp(session, role="creator")
     async with app.run_test() as pilot:
@@ -196,17 +201,48 @@ async def test_session_screen_tab_cycles_ui_elements(tmp_path):
         # Initial focus is cwd_list
         assert screen.focused.id == "cwd_list"
 
-        # Tab moves to file_input
-        await pilot.press("tab")
-        assert screen.focused.id == "file_input"
-
-        # Tab moves to download_input
+        # Tab moves to download_input (send input was removed)
         await pilot.press("tab")
         assert screen.focused.id == "download_input"
 
-        # Tab cycles back to cwd_list
+        # Tab cycles back to cwd_list (allow/deny are hidden)
         await pilot.press("tab")
         assert screen.focused.id == "cwd_list"
+
+
+@pytest.mark.asyncio
+async def test_session_screen_find_label_auto_first_and_zero(tmp_path):
+    """Find label always visible, auto-first file/folder on dir change,
+    and 0 deselects all."""
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (tmp_path / "a.txt").write_bytes(b"a")
+    (tmp_path / "b.txt").write_bytes(b"b")
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        # Find label, even with empty query.
+        find = screen.query_one("#browser_search_indicator", Static).render().plain
+        assert "Find:" in find
+        # Auto-first: after going into a folder, highlighted row is
+        # the first real entry, not the ".." parent row.
+        screen._go_into(sub)
+        lst = screen.query_one("#cwd_list", ListView)
+        assert lst.index == 0  # sub is empty, so first row is ".." only
+        screen._go_up()
+        # Back in tmp: rows are .., sub, a, b -> auto-first is sub (index 1)
+        lst = screen.query_one("#cwd_list", ListView)
+        assert lst.index == 1
+        # Search, then dir change resets it.
+        screen._search_query = "a"
+        screen._go_into(sub)
+        assert screen._search_query == ""
+        # 0 deselects all, when not typing in an input.
+        screen.selection = [tmp_path / "a.txt"]
+        screen._refresh_selected()
+        await pilot.press("0")
+        assert screen.selection == []
 @pytest.mark.asyncio
 async def test_session_screen_download_button_removed_and_disabled_on_send(tmp_path):
     """Requirement 6: Download button removed, Enter initiates request,
@@ -315,9 +351,9 @@ async def test_session_screen_download_section_and_zero_gaps(tmp_path):
         assert any("DOWNLOAD FROM PEER" in l for l in labels)
         assert dl_composer.query_one("#download_input", Input) is not None
 
-        # Header row is exactly 3 lines high
+        # Header row is now 2 lines high (plain header, not 3-line banner)
         header = screen.query_one("#session_header_row")
-        assert header.styles.height.value == 3
+        assert header.styles.height.value == 2
         assert header.styles.margin.bottom == 0
 
 @pytest.mark.asyncio

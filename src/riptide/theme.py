@@ -78,16 +78,12 @@ DIM = "#71717A"
 SUCCESS = "#78DC8C"
 WARNING = "#FFD166"
 ERROR = "#FF6B6B"
-BANNER_HOST = """\
-█  █  ███   ███  █████
-█▄▄█ █   █ ▀▀█     █  
-█  █  ███  ███     █  \
-"""
-BANNER_CLIENT = """\
-████ █    █ █████ █  █ █████
-█    █    █ █▄▄   ██▄█   █  
-████ ████ █ █▄▄▄  █  █   █  \
-"""
+# Session header, plain terminal font, not block ASCII art.
+# Terminals render all text at one size, so "larger than other
+# text" here means bold + accent + a dedicated header row, not
+# a larger pixel font, which Textual cannot set per widget.
+BANNER_HOST = "HOST"
+BANNER_CLIENT = "CLIENT"
 HEADER_BANNER = """\
 ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
 ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -366,23 +362,27 @@ ListView:focus > ListItem.--highlight Label {
 }
 #session_header_row {
     width: 100%;
-    height: 3;
-    max-height: 3;
+    height: 2;
+    max-height: 2;
     layout: horizontal;
     margin: 0;
     padding: 0;
 }
 #session_host_title {
     width: auto;
-    height: 3;
+    height: 1;
     color: #FF6B6B;
     text-style: bold;
     padding: 0;
     margin: 0;
 }
+.session-header-text {
+    color: #FF6B6B;
+    text-style: bold;
+}
 #session_peer_info {
     width: 1fr;
-    height: 3;
+    height: 2;
     layout: vertical;
     padding: 0;
     margin: 0;
@@ -468,6 +468,15 @@ ListView:focus > ListItem.--highlight Label {
     padding: 0;
     margin: 0;
     color: #71717A;
+}
+#join_actions {
+    width: 100%;
+    layout: horizontal;
+    padding: 1 0;
+    margin: 0;
+}
+#join_actions Button {
+    margin: 0 1;
 }
 
 #selected_files_section,

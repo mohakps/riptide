@@ -38,6 +38,7 @@ class CreateScreen(Screen):
         self.config = load_config()
         self._approve_event = threading.Event()
         self._approved = False
+        self._awaiting_approval = False
         self._allow_btn: Button | None = None
         self._deny_btn: Button | None = None
 
@@ -54,7 +55,7 @@ class CreateScreen(Screen):
             Button("Create Server", id="create", classes="primary"),
             Button("Allow", id="allow", classes="allow"),
             Button("Deny", id="deny", classes="deny"),
-            Static("[Enter] Connect   [Esc] Back", classes="keymap-bar"),
+            Static("[Space] Select   [Enter] Create / Allow   [Backspace] Deny   [Esc] Back", classes="keymap-bar"),
         )
 
     def _set_allow_visible(self, visible: bool) -> None:
@@ -73,6 +74,7 @@ class CreateScreen(Screen):
 
     def _approve(self, fingerprint: str) -> bool:
         self._approved = False
+        self._awaiting_approval = True
         self._approve_event.clear()
         try:
             self.app.call_from_thread(self.query_one("#fingerprint", Static).update, f"Fingerprint: {fingerprint[:32]}... Allow to trust this joiner?")
@@ -80,6 +82,7 @@ class CreateScreen(Screen):
         except Exception:
             pass
         self._approve_event.wait(timeout=120)
+        self._awaiting_approval = False
         try:
             self.app.call_from_thread(self._set_allow_visible, False)
         except Exception:
@@ -90,8 +93,7 @@ class CreateScreen(Screen):
         if event.input.id == "host":
             self._start()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        bid = event.button.id or ""
+    def _handle_button_id(self, bid: str) -> bool:
         if bid.startswith("peer_"):
             try:
                 idx = int(bid.split("_", 1)[1])
@@ -100,18 +102,27 @@ class CreateScreen(Screen):
                 self._set_status(f"Selected past host: {host}")
             except Exception:
                 pass
-        elif bid == "create":
+            return True
+        if bid == "create":
             self._start()
-        elif bid == "allow":
+            return True
+        if bid == "allow":
             self._approved = True
             self._approve_event.set()
             self._set_allow_visible(False)
-        elif bid == "deny":
+            return True
+        if bid == "deny":
             self._approved = False
             self._approve_event.set()
             self._set_allow_visible(False)
-        elif bid == "back":
+            return True
+        if bid == "back":
             self.app.pop_screen()
+            return True
+        return False
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self._handle_button_id(event.button.id or "")
 
     def _start(self) -> None:
         try:
@@ -160,6 +171,25 @@ class CreateScreen(Screen):
     async def on_key(self, event) -> None:
         if event.key == "escape":
             self.app.pop_screen()
+            return
+        focused = self.focused
+        # Backspace: deny, when a fingerprint is waiting, and the
+        # host input is not focused (there, Backspace deletes text).
+        if event.key == "backspace" and self._awaiting_approval and not isinstance(focused, Input):
+            event.stop()
+            self._handle_button_id("deny")
+            return
+        # Enter: allow, when a fingerprint is waiting and the user
+        # is not already on a button (which activates itself).
+        if event.key == "enter" and self._awaiting_approval and not isinstance(focused, Button):
+            event.stop()
+            self._handle_button_id("allow")
+            return
+        # Space: select the focused button. In the host input, let
+        # Space type normally.
+        if event.key == "space" and isinstance(focused, Button):
+            event.stop()
+            self._handle_button_id(focused.id or "")
             return
         if handle_arrow_key(self, event.key):
             event.stop()
