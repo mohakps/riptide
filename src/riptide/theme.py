@@ -165,4 +165,69 @@ OptionList > .option-list--option-highlighted {
     color: #FF6B6B;
     text-style: bold;
 }
+ListView {
+    background: transparent;
+    border: round #3F3F46;
+    padding: 0 1;
+    height: 10;
+}
+ListView:focus {
+    border: round #FF6B6B;
+}
+ListItem {
+    background: transparent;
+    padding: 0 1;
+}
+ListItem.--highlight {
+    background: transparent;
+}
+ListItem.--highlight .file-name {
+    color: #FF6B6B;
+    text-style: bold;
+}
+.file-row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    background: transparent;
+}
+.file-name {
+    width: 1fr;
+    color: #E8E8E8;
+}
+.file-size {
+    width: 12;
+    text-align: right;
+    color: #71717A;
+}
+.file-mtime {
+    width: 22;
+    text-align: right;
+    color: #71717A;
+}
+.file-header-row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    padding: 0 2;
+    color: #71717A;
+    text-style: bold;
+}
+.file-header-name {
+    width: 1fr;
+    color: #71717A;
+    text-style: bold;
+}
+.file-header-size {
+    width: 12;
+    text-align: right;
+    color: #71717A;
+    text-style: bold;
+}
+.file-header-mtime {
+    width: 22;
+    text-align: right;
+    color: #71717A;
+    text-style: bold;
+}
 """

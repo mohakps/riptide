@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBar, Static
 
@@ -31,6 +31,7 @@ from ..core.file_select import (
     add_to_selection,
     complete,
     format_bytes,
+    format_file_row,
     list_cwd_files,
     parse_dropped_text,
     total_size,
@@ -38,8 +39,19 @@ from ..core.file_select import (
 from ..core.focus import focus_first, handle_arrow_key
 from ..core.session import Session
 from ..core.transfer import TransferProgress, format_bytes as fmt_bytes, format_eta
-from ..theme import HEADER_LINES
+from ..theme import HEADER_LINES, TAGLINES
 
+
+def _build_file_item(path: Path) -> ListItem:
+    name, size, mtime = format_file_row(path)
+    return ListItem(
+        Horizontal(
+            Label(f"> {name}", classes="file-name"),
+            Label(size, classes="file-size"),
+            Label(mtime, classes="file-mtime"),
+            classes="file-row",
+        )
+    )
 
 class SessionScreen(Screen):
     def __init__(self, session: Session, role: str) -> None:
@@ -53,21 +65,26 @@ class SessionScreen(Screen):
 
     def compose(self) -> ComposeResult:
         files = list_cwd_files(self.cwd)
-        items = [ListItem(Label(f"{p.name}  ({format_bytes(p.stat().st_size)})")) for p in files]
+        items = [_build_file_item(p) for p in files]
         yield Vertical(
-            Static("\n".join(HEADER_LINES), classes="header"),
-            Static(f"SESSION  ({self.role})  with {self.session.peer_device or 'peer'}", classes="accent"),
+            Static(f"SESSION ({self.role.upper()}) with {self.session.peer_device or 'peer'}", classes="screen-title"),
+            Static(TAGLINES["session"], classes="screen-desc"),
             Static("Status: connected", id="status"),
+            Horizontal(
+                Label("NAME", classes="file-header-name"),
+                Label("SIZE", classes="file-header-size"),
+                Label("MODIFIED", classes="file-header-mtime"),
+                classes="file-header-row",
+            ),
             ListView(*items, id="cwd_list"),
             Input(placeholder="Type a file name, Tab to complete, Enter to add. Paste dropped paths here.", id="file_input"),
             Static("Selected: none", id="selected"),
-            Button("Send selected", id="send"),
+            Button("Send selected", id="send", classes="primary"),
             Input(placeholder="Remote file name to download", id="download_input"),
             Button("Download remote file", id="download"),
             ProgressBar(total=100, id="bar"),
             Static("Speed: -  |  Transferred: -", id="stats"),
-            Button("Leave session", id="leave"),
-            Static("Files you receive land in this folder. Files the other side requests come from this folder.", classes="dim"),
+            Static("[↑/↓] Move   [Enter] Add to selection   [Tab] Complete path   [Esc] Leave session", classes="keymap-bar"),
         )
 
     def on_mount(self) -> None:
@@ -91,7 +108,7 @@ class SessionScreen(Screen):
             lst = self.query_one("#cwd_list", ListView)
             lst.clear()
             for p in list_cwd_files(self.cwd):
-                lst.append(ListItem(Label(f"{p.name}  ({format_bytes(p.stat().st_size)})")))
+                lst.append(_build_file_item(p))
         except Exception:
             pass
 
