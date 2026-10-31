@@ -219,20 +219,32 @@ Button.primary:focus {
     color: #121212;
 }
 Button.allow {
-    border: round #78DC8C;
-    color: #78DC8C;
-}
-Button.allow:focus {
     background: #78DC8C;
     color: #121212;
+    text-style: bold;
+    border: none;
+    width: 22;
+    min-width: 22;
+    height: 3;
+}
+Button.allow:focus {
+    background: #8EEC9F;
+    color: #000000;
+    border: tall #FFFFFF;
 }
 Button.deny {
-    border: round #71717A;
-    color: #71717A;
+    background: #FF6B6B;
+    color: #121212;
+    text-style: bold;
+    border: none;
+    width: 22;
+    min-width: 22;
+    height: 3;
 }
 Button.deny:focus {
-    border: round #FF6B6B;
-    color: #FF6B6B;
+    background: #FF8585;
+    color: #000000;
+    border: tall #FFFFFF;
 }
 ProgressBar {
     margin: 1 0;
@@ -620,5 +632,41 @@ ProgressBar > .bar--bar {
 }
 .keymap-right {
     text-align: right;
+}
+
+/* Join Screen Redesign Styles */
+#incoming_card {
+    width: 100%;
+    height: auto;
+    border: round #3F3F46;
+    background: transparent;
+    padding: 1 2;
+    margin: 1 0;
+}
+#incoming_card.active {
+    border: round #78DC8C;
+}
+#incoming {
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    color: #E8E8E8;
+}
+#join_actions {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin: 1 0 0 0;
+    padding: 0;
+}
+#join_actions Button {
+    width: 22;
+    min-width: 22;
+    height: 3;
+    margin: 0 2;
+    text-style: bold;
+    border: none;
 }
 """

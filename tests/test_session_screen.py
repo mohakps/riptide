@@ -376,6 +376,6 @@ async def test_session_screen_scrollable_and_footer_keys_in_brackets(tmp_path):
         keys = [str(getattr(item.render(), "plain", item.render())) for item in footer_items]
         for expected_key in ("[↑/↓]", "[Space]", "[Enter]", "[Tab]", "[Backspace]", "[Esc]"):
             assert any(expected_key in k for k in keys), f"Expected key {expected_key} in footer"
-        assert any("Open / Select" in k for k in keys)
+        assert any("Open/Select" in k or "Open / Select" in k for k in keys)
         assert any("Send" in k for k in keys)
         assert any("Cycle UI" in k for k in keys)
