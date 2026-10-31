@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riptide"
+version = "0.1.0"
+description = "Direct, encrypted PC-to-PC file transfer in the terminal. No cloud upload, no website in the data path."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "riptide"}]
+dependencies = [
+    "textual>=0.86",
+    "paramiko>=3.4",
+]
+
+[project.scripts]
+riptide = "riptide.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
