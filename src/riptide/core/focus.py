@@ -16,7 +16,7 @@ from __future__ import annotations
 def focusable_widgets(screen):
     """Return focusable widgets in DOM order, skipping disabled ones."""
     try:
-        widgets = list(screen.query("Button, Input, ListView"))
+        widgets = list(screen.query("OptionList, ListView, Button, Input"))
     except Exception:
         return []
     result = []

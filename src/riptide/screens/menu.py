@@ -1,42 +1,60 @@
+from __future__ import annotations
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Static
+from textual.widgets import OptionList, Static
+from textual.widgets.option_list import Option
 
+from .. import __version__
 from ..core.focus import focus_first, handle_arrow_key
-from ..theme import HEADER_LINES
+from ..theme import HEADER_BANNER, TAGLINES
 
 
 class MenuScreen(Screen):
     def compose(self) -> ComposeResult:
+        options = [
+            Option("❯  Create Server      Dial out to peer · bypasses CGNAT", id="create"),
+            Option("   Join Server        Wait for incoming session and authorize peer", id="join"),
+        ]
         yield Vertical(
-            Static("\n".join(HEADER_LINES), classes="header"),
-            Static("Direct file transfer. No cloud in the middle.", classes="subheader"),
-            Button("Create Server", id="create"),
-            Button("Join Server", id="join"),
-            Button("Exit", id="exit"),
-            Static("Arrow keys + Enter to choose. Esc goes back.", classes="dim"),
-            Static("Set-up is disabled in this version.", classes="dim"),
+            Static(HEADER_BANNER, classes="header"),
+            Static(f"v{__version__}", classes="version-tag"),
+            Static(TAGLINES["home"], classes="subheader"),
+            OptionList(*options, id="menu_list"),
+            Static("[↑/↓] Navigate   [Enter] Select   [Esc/q] Quit", classes="keymap-bar"),
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         from .create import CreateScreen
         from .join import JoinScreen
 
-        button_id = event.button.id
-        if button_id == "create":
+        opt_id = event.option_id
+        if opt_id == "create":
             self.app.push_screen(CreateScreen())
-        elif button_id == "join":
+        elif opt_id == "join":
             self.app.push_screen(JoinScreen())
-        elif button_id == "exit":
-            self.app.exit()
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        try:
+            opt_list = self.query_one("#menu_list", OptionList)
+            prompts = [
+                ("create", "Create Server", "Dial out to peer · bypasses CGNAT"),
+                ("join", "Join Server", "Wait for incoming session and authorize peer"),
+            ]
+            for idx, (oid, title, desc) in enumerate(prompts):
+                prefix = "❯  " if idx == event.option_index else "   "
+                opt_list.replace_option_prompt_at_index(idx, f"{prefix}{title:<18} {desc}")
+        except Exception:
+            pass
 
     def on_mount(self) -> None:
         focus_first(self)
 
     async def on_key(self, event) -> None:
-        if event.key == "escape":
+        if event.key in ("escape", "q"):
             self.app.exit()
+            event.stop()
             return
         if handle_arrow_key(self, event.key):
             event.stop()
