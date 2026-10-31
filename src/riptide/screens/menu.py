@@ -3,6 +3,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Static
 
+from ..core.focus import focus_first, handle_arrow_key
 from ..theme import HEADER_LINES
 
 
@@ -33,6 +34,14 @@ class MenuScreen(Screen):
         elif button_id == "exit":
             self.app.exit()
 
+    def on_mount(self) -> None:
+        # Without this, no button is focused at start and arrow keys
+        # appear to do nothing. Focus Send first.
+        focus_first(self)
+
     async def on_key(self, event) -> None:
         if event.key == "escape":
             self.app.exit()
+            return
+        if handle_arrow_key(self, event.key):
+            event.stop()

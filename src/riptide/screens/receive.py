@@ -8,6 +8,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Static
 
 from ..core.config import Peer, add_peer, load_config
+from ..core.focus import focus_first, handle_arrow_key
 from ..core.pairing import PairingCode, PairingServer, generate_code, remove_authorized_key
 from ..theme import HEADER_LINES
 
@@ -41,6 +42,7 @@ class ReceiveScreen(Screen):
 
     def on_mount(self) -> None:
         self._start_server()
+        focus_first(self)
 
     def _start_server(self) -> None:
         self._stop_server()
@@ -125,3 +127,6 @@ class ReceiveScreen(Screen):
             self._cleanup_once()
             self._stop_server()
             self.app.pop_screen()
+            return
+        if handle_arrow_key(self, event.key):
+            event.stop()

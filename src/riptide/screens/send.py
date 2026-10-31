@@ -9,6 +9,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from ..core.config import Peer, add_peer, load_config
+from ..core.focus import focus_first, handle_arrow_key
 from ..core.file_select import (
     add_to_selection,
     complete,
@@ -107,11 +108,26 @@ class SendScreen(Screen):
         add_to_selection(self.selection, [chosen])
         self._refresh_selected()
 
+    def on_mount(self) -> None:
+        # Start on the peer input so typing works immediately.
+        try:
+            self.query_one("#peer", Input).focus()
+        except Exception:
+            focus_first(self)
+
     async def on_key(self, event) -> None:
         if event.key == "escape":
             self._close_ssh()
             self.app.pop_screen()
             return
+        # In the file list, Up/Down must keep their native meaning:
+        # moving the list selection. Everywhere else, Up/Down move focus.
+        # This also gives a way out of the file input, where Tab is
+        # reserved for name completion.
+        if event.key in ("up", "down") and not isinstance(self.focused, ListView):
+            if handle_arrow_key(self, event.key):
+                event.stop()
+                return
         focused = self.focused
         if event.key == "tab" and isinstance(focused, Input) and focused.id == "file_input":
             event.stop()

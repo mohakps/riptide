@@ -9,6 +9,7 @@ from textual.screen import Screen
 from textual.widgets import Button, ProgressBar, Static
 
 from ..core.config import Config
+from ..core.focus import focus_first, handle_arrow_key
 from ..core.file_select import total_size
 from ..core.keys import ensure_keypair
 from ..core.ssh_client import RiptideSSH, parse_peer
@@ -41,6 +42,7 @@ class TransferScreen(Screen):
         )
 
     def on_mount(self) -> None:
+        focus_first(self)
         threading.Thread(target=self._run_worker, daemon=True).start()
 
     def _update_ui(self, status: str, current: str) -> None:
@@ -119,3 +121,6 @@ class TransferScreen(Screen):
             if self._ssh is not None:
                 self._ssh.close()
             self.app.pop_screen()
+            return
+        if handle_arrow_key(self, event.key):
+            event.stop()

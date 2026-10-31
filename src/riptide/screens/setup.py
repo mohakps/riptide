@@ -9,6 +9,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Static
 
 from ..core import nat as nat_mod
+from ..core.focus import focus_first, handle_arrow_key
 from ..core.setup_linux import run_setup as linux_setup, steps as linux_steps
 from ..core.setup_windows import run_setup as windows_setup, steps as windows_steps
 from ..theme import HEADER_LINES
@@ -59,6 +60,12 @@ class SetupScreen(Screen):
         except Exception as exc:
             self.app.call_from_thread(self._set_output, f"Set-up failed: {exc}")
 
+    def on_mount(self) -> None:
+        focus_first(self)
+
     async def on_key(self, event) -> None:
         if event.key == "escape":
             self.app.pop_screen()
+            return
+        if handle_arrow_key(self, event.key):
+            event.stop()
