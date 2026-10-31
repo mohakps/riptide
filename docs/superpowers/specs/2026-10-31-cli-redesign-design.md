@@ -31,8 +31,9 @@ Riptide is a terminal-based peer-to-peer file transfer tool built with Textual. 
 - Success color: Green (`#78DC8C`) for verified status, connected peers, and "Allow" action.
 - Warning color: Yellow/amber (`#FFD166`) for incoming requests.
 
-### 2.2 Header & Brand
-- Bold ANSI Shadow Block ASCII header on homepage:
+### 2.2 Header, Dynamic Version & Taglines
+- **Dynamic Version Retrieval:** The app version is dynamically resolved at runtime from `pyproject.toml` (using `tomllib` with fallback to `importlib.metadata.version("riptide")`), never hardcoded.
+- **Homepage Brand Header:**
   ```text
   ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
   ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -41,8 +42,26 @@ Riptide is a terminal-based peer-to-peer file transfer tool built with Textual. 
   ██║  ██║██║██║        ██║   ██║██████╔╝███████╗
   ╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ╚═╝╚═════╝ ╚══════╝
   ```
-  Followed by muted tagline: `~~~  direct peer-to-peer file transfer  ~~~`
-  Rendered in soft coral (`#FF6B6B`) with center alignment on transparent background.
+  Followed by a dynamic version tag badge and crisp tagline:
+  - **Version Badge:** `v{version}` (e.g. `v0.5.0`) styled in muted accent.
+  - **Homepage Subheader / Tagline:**
+    `Direct, encrypted PC-to-PC file transfer · Zero cloud storage, zero intermediate hops`
+
+- **Rewritten Screen Subheaders & Taglines:**
+  - **Create Server:**
+    - Header: `CREATE SERVER`
+    - Tagline: `Dial directly to peer · Outbound connection bypasses CGNAT and strict firewalls`
+    - Past Peers Caption: `Recent Peers · Select to autofill destination`
+  - **Join Server:**
+    - Header: `JOIN SERVER`
+    - Tagline: `Listening for peer handshake · Keep this screen open while the creator dials in`
+    - Network note: `Share your address with the sender · Incoming sessions require explicit approval`
+  - **Session Screen:**
+    - Header: `ACTIVE SESSION · {ROLE.upper()} with {PEER}`
+    - Tagline: `Direct end-to-end encrypted channel · Select local files or drop paths to transfer`
+  - **Setup Screen:**
+    - Header: `ENVIRONMENT & NETWORK SETUP`
+    - Tagline: `Configure local SSH daemon and automated UPnP port forwarding for inbound connections`
 
 ### 2.3 Keymap Footer Bar
 - Context-aware footer bar displayed at the bottom of screens:
@@ -56,13 +75,13 @@ Riptide is a terminal-based peer-to-peer file transfer tool built with Textual. 
 ## 3. Screen Designs & Components
 
 ### 3.1 Homepage Menu (`src/riptide/screens/menu.py`)
+- Display ANSI Shadow Block header with dynamic `v{version}` and updated tagline.
 - Removed `Button("Exit")`.
 - Replaced buttons with interactive list navigation (`OptionList` or clean `ListView`):
   - **Option 1:** `Create Server` — `Dial out to peer (CGNAT-friendly)`
   - **Option 2:** `Join Server` — `Wait for incoming session and authorize peer`
 - Selection indicator: `❯` in accent color for active item; inactive items indented.
 - Keyboard bindings: `Up`/`Down` to navigate, `Enter` to select, `Esc` or `q` to quit cleanly.
-
 ### 3.2 File Browser & Session Screen (`src/riptide/screens/session_screen.py`)
 - **Row Format:** Every row starts with `> ` followed by aligned columns:
   ```text
