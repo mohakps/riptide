@@ -182,13 +182,13 @@ class SessionScreen(Screen):
 
     def _update_folder_header(self) -> None:
         try:
-            self.query_one("#browser_path", Static).update(f"📁 Folder: {self.browser_dir}")
+            self.query_one("#browser_path", Static).update(f"📁 {self.browser_dir}")
             # Find label is always visible at the right corner of the
             # file-selection box header, with the typed text in white
             # and a blinking cursor, even when the query is empty.
             cursor = "▌" if getattr(self, "_find_cursor_visible", True) else " "
             self.query_one("#browser_search_indicator", Static).update(
-                f"[#71717A]Find:[/] [bold #FFFFFF]{self._search_query}[/][bold #FF6B6B]{cursor}[/]"
+                f"[#E8E8E8]Find:[/] [bold #FFFFFF]{self._search_query}[/][bold #FF6B6B]{cursor}[/]"
             )
         except Exception:
             pass
@@ -224,7 +224,7 @@ class SessionScreen(Screen):
             ),
             Vertical(
                 Horizontal(
-                    Static(f"📁 Folder: {self.browser_dir}", id="browser_path"),
+                    Static(f"📁 {self.browser_dir}", id="browser_path"),
                     Static("Find: ▌", id="browser_search_indicator"),
                     id="browser_header_row",
                 ),
@@ -276,13 +276,13 @@ class SessionScreen(Screen):
             can_focus=False,
         )
         yield Horizontal(
-            Label(r"[bold #E8E8E8]\[↑/↓][/] [dim]Move[/]", classes="keymap-item keymap-left"),
-            Label(r"[bold #E8E8E8]\[Space][/] [dim]Open / Select[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Enter][/] [dim]Send[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[0][/] [dim]Deselect all[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Tab][/] [dim]Cycle UI[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Backspace][/] [dim]Erase Find / Up[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Esc][/] [dim]Leave[/]", classes="keymap-item keymap-right"),
+            Label(r"[bold #E8E8E8]\[↑/↓][/] [dim #FFFFFF]Move[/]", classes="keymap-item keymap-left"),
+            Label(r"[bold #E8E8E8]\[Space][/] [dim #FFFFFF]Open/Select[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[0][/] [dim #FFFFFF]Deselect all[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Send[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Erase/Prev.Directory[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Tab][/] [dim #FFFFFF]Cycle UI[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Esc][/] [dim #FFFFFF]Leave[/]", classes="keymap-item keymap-right"),
             id="footer_bar",
         )
 
@@ -426,7 +426,6 @@ class SessionScreen(Screen):
         return (
             f"[bold #FFFFFF]Selected Files ({len(self.selection)})[/]  "
             f"[#71717A]·[/]  [#E8E8E8]Total: {format_bytes(total)}[/]  "
-            f"[#71717A]·[/]  [bold #FF6B6B][Enter] Send selected files[/]"
         )
 
     def _refresh_selected(self) -> None:
@@ -436,7 +435,7 @@ class SessionScreen(Screen):
             selected_container.remove_children()
             for p in self.selection:
                 size_str = format_bytes(p.stat().st_size) if p.is_file() else ""
-                dim_size = f"  [dim]({size_str})[/]" if size_str else ""
+                dim_size = f"  [dim #FFFFFF]({size_str})[/]" if size_str else ""
                 selected_container.mount(
                     Static(f"[bold #FF6B6B]• {p.resolve()}[/]{dim_size}", classes="selected-file-item")
                 )
