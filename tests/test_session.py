@@ -3,7 +3,49 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from riptide.core.session import JoinListener, create_session
+from riptide.core.session import JoinListener, create_session, parse_host_input
+
+
+def test_parse_host_input():
+    assert parse_host_input("metalvoid.ddns.net") == "metalvoid.ddns.net"
+    assert parse_host_input("192.168.1.10") == "192.168.1.10"
+    assert parse_host_input("2001:db8::1") == "2001:db8::1"
+    assert parse_host_input("[2001:db8::1]") == "2001:db8::1"
+    assert parse_host_input("mpsingh@metalvoid.ddns.net") == "metalvoid.ddns.net"
+    assert parse_host_input("user@[2001:db8::1]") == "2001:db8::1"
+    assert parse_host_input("  192.168.1.10  ") == "192.168.1.10"
+    try:
+        parse_host_input("")
+        assert False
+    except ValueError:
+        pass
+
+
+def test_receiver_progress_and_no_idle_timeout(tmp_path):
+    # Receiver progress callback fires, and the creator socket is
+    # in blocking mode after handshake (not the old 30s timeout).
+    creator_dir = tmp_path / "creator2"; joiner_dir = tmp_path / "joiner2"
+    creator_dir.mkdir(); joiner_dir.mkdir()
+    (creator_dir / "big.txt").write_text("x" * 500000)
+    port = _free_port()
+    progress = []
+    join_session = {}
+
+    def join_worker():
+        listener = JoinListener(port, joiner_dir, device="joiner", home=tmp_path / "jhome2", approve=lambda d, fp: True)
+        s = listener.wait_for_creator()
+        s.on_progress = lambda n, r, t: progress.append((n, r, t))
+        s.start(); join_session["s"] = s
+
+    t = threading.Thread(target=join_worker, daemon=True); t.start(); time.sleep(0.5)
+    creator = create_session("127.0.0.1", port, creator_dir, device="creator", home=tmp_path / "chome2", approve_fingerprint=lambda fp: True)
+    creator.start()
+    assert creator.sock.gettimeout() is None
+    assert creator.send_file(creator_dir / "big.txt")
+    time.sleep(1)
+    assert progress, "receiver progress should have fired"
+    assert progress[-1][1] == progress[-1][2] == 500000
+    creator.close(); join_session["s"].close()
 
 
 def _free_port():

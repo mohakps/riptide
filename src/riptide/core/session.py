@@ -28,14 +28,84 @@ for a message it is supposed to read itself.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import socket
 import ssl
 import struct
 import threading
+import time
 from pathlib import Path
 
 from .identity import cert_fingerprint, ensure_identity
+
+
+def parse_host_input(text: str) -> str:
+    """Parse a Create-server address into a bare host.
+
+    Accepts, all with no port typed by the user:
+    - a hostname: metalvoid.ddns.net
+    - an IPv4 address: 192.168.1.10
+    - an IPv6 address: 2001:db8::1, or [2001:db8::1]
+    - user@host, for compatibility with the v3 input: user@metalvoid.ddns.net,
+      user@192.168.1.10, user@[2001:db8::1]
+    - host:port, if a port was typed anyway, is stripped for plain
+      hostnames / IPv4; a bare IPv6 address is never split on ':'.
+    Raises ValueError for an empty or unusable input.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Enter a host first")
+    if "@" in text:
+        text = text.rsplit("@", 1)[1].strip()
+    if not text:
+        raise ValueError("Enter a host first")
+    if text.startswith("["):
+        # [ipv6] or [ipv6]:port
+        end = text.find("]")
+        if end == -1:
+            raise ValueError("Bad IPv6 address: missing ]")
+        host = text[1:end].strip()
+        if not host:
+            raise ValueError("Enter a host first")
+        return host
+    # Bare IPv6: more than one ':' and a valid IPv6 parse.
+    if text.count(":") > 1:
+        try:
+            ipaddress.IPv6Address(text)
+            return text
+        except Exception:
+            raise ValueError("Bad IPv6 address")
+    # Single ':' for hostname/IPv4 with a port: strip the port.
+    if text.count(":") == 1:
+        host, _port = text.split(":", 1)
+        host = host.strip()
+        if not host:
+            raise ValueError("Enter a host first")
+        return host
+    return text
+
+
+def _set_keepalive(sock) -> None:
+    """Blocking socket + TCP keepalive, so an idle session does not
+    time out. This is the v2 idle-cutoff fix: socket.create_connection
+    left a 30-second timeout on the creator socket, so recv() timed
+    out after 30 seconds of no file transfer and the reader loop
+    ended the session. Blocking mode + keepalive removes that."""
+    try:
+        sock.settimeout(None)
+    except Exception:
+        pass
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except Exception:
+        pass
+    # Linux TCP keepalive tunables; harmless if unavailable (Windows).
+    for opt, value in (("TCP_KEEPIDLE", 10), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), value)
+        except Exception:
+            pass
 
 
 def _recv_exact(sock, n: int) -> bytes:
@@ -56,7 +126,7 @@ def _send_header(sock, header: dict) -> None:
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
                  on_file_received=None, on_ack=None, on_status=None, on_error=None,
-                 on_ssh_download_request=None):
+                 on_ssh_download_request=None, on_progress=None):
         self.sock = sock
         self.cwd = Path(cwd)
         self.device = device
@@ -67,9 +137,11 @@ class Session:
         self.on_ack = on_ack
         self.on_status = on_status
         self.on_error = on_error
+        self.on_progress = on_progress
         self._send_lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
+        self._heartbeat_thread: threading.Thread | None = None
 
     # -- sending -------------------------------------------------
     def send_file(self, path: Path, on_progress=None) -> bool:
@@ -143,9 +215,26 @@ class Session:
     def start(self) -> None:
         if self._running:
             return
+        _set_keepalive(self.sock)
         self._running = True
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat, daemon=True)
+        self._heartbeat_thread.start()
+
+    def _heartbeat(self) -> None:
+        """Ping every 10 seconds while idle, so NAT/firewall idle
+        timeouts do not close a session with no file transferring.
+        Ping/pong are control messages, not file bytes."""
+        while self._running:
+            time.sleep(10)
+            if not self._running:
+                break
+            try:
+                with self._send_lock:
+                    _send_header(self.sock, {"type": "ping"})
+            except Exception:
+                break
 
     def _reader(self) -> None:
         try:
@@ -163,6 +252,15 @@ class Session:
                 elif kind == "ack":
                     if self.on_ack is not None:
                         self.on_ack(header.get("name", ""), bool(header.get("ok")), header.get("reason", ""))
+                elif kind == "ping":
+                    # Reply, so both directions see traffic. No UI update.
+                    try:
+                        with self._send_lock:
+                            _send_header(self.sock, {"type": "pong"})
+                    except Exception:
+                        pass
+                elif kind == "pong":
+                    pass
                 elif kind == "ssh_download_request":
                     if self.on_ssh_download_request is not None:
                         self.on_ssh_download_request(str(header.get("name", "")))
@@ -188,6 +286,8 @@ class Session:
         final = self.cwd / name
         digest = hashlib.sha256()
         remaining = size
+        received = 0
+        last_report = 0.0
         try:
             with open(part, "wb") as dest:
                 while remaining > 0:
@@ -197,6 +297,17 @@ class Session:
                     dest.write(chunk)
                     digest.update(chunk)
                     remaining -= len(chunk)
+                    received += len(chunk)
+                    # Receiver progress: report at most every 0.1s, plus
+                    # always on the final chunk, so the UI stays live
+                    # without flooding it on every 128KB chunk.
+                    now = time.monotonic()
+                    if self.on_progress is not None and (now - last_report >= 0.1 or remaining == 0):
+                        last_report = now
+                        try:
+                            self.on_progress(name, received, size)
+                        except Exception:
+                            pass
         except Exception as exc:
             if self.on_error is not None:
                 self.on_error(f"receive failed: {exc}")
@@ -340,6 +451,7 @@ class JoinListener:
             tls = ctx.wrap_socket(raw, server_side=True)
         except Exception as exc:
             raise ConnectionError(f"TLS failed: {exc}") from exc
+        _set_keepalive(tls)
         # Creator identity: its client cert, if presented.
         peer_der = tls.getpeercert(binary_form=True)
         peer_fp = cert_fingerprint(peer_der) if peer_der else ""
@@ -391,6 +503,9 @@ def create_session(host: str, port: int, cwd: Path, device: str,
         except Exception:
             pass
         raise ConnectionError(f"TLS failed: {exc}") from exc
+    # Critical: create_connection left a 30s timeout on this socket.
+    # Without clearing it, an idle session timed out after 30s.
+    _set_keepalive(tls)
     server_der = tls.getpeercert(binary_form=True)
     server_fp = cert_fingerprint(server_der) if server_der else ""
     if known_fingerprint and server_fp != known_fingerprint:

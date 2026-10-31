@@ -1,9 +1,12 @@
-"""Join Server: the public side, if one side is CGNAT.
+"""Join Server, v4 TLS rollback.
 
-The joiner does not dial the creator, because the creator may be
-behind CGNAT and unreachable. The joiner waits, the creator dials
-in, and the joiner presses Allow to accept the session. After
-that, either side can send or download.
+The joiner does not dial the creator, because the creator may
+be behind CGNAT and unreachable. The joiner waits, the creator
+dials in, and the joiner presses Allow to accept the session.
+
+Fix in v4: Allow/Deny are hidden until an incoming session
+actually arrives, then hidden again after the decision. They
+are not visible before an incoming request.
 """
 from __future__ import annotations
 
@@ -31,6 +34,8 @@ class JoinScreen(Screen):
         self._approve_event = threading.Event()
         self._approved = False
         self._listener: JoinListener | None = None
+        self._allow_btn: Button | None = None
+        self._deny_btn: Button | None = None
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -43,8 +48,16 @@ class JoinScreen(Screen):
             Button("Allow", id="allow"),
             Button("Deny", id="deny"),
             Button("Back", id="back"),
-            Static("Public side: your SSH server must be running, and your router must forward to this machine once. File data goes over SSH. No code to type.", classes="dim"),
+            Static("If you are the public side, your router must forward to this machine once. No code to type.", classes="dim"),
         )
+
+    def _set_allow_visible(self, visible: bool) -> None:
+        for btn in (self._allow_btn, self._deny_btn):
+            if btn is not None:
+                try:
+                    btn.styles.display = "block" if visible else "none"
+                except Exception:
+                    pass
 
     def _set_status(self, text: str) -> None:
         try:
@@ -60,24 +73,37 @@ class JoinScreen(Screen):
             self.app.call_from_thread(self.query_one("#incoming", Static).update, f"Incoming session from: {device}. Allow to join?")
             if fingerprint:
                 self.app.call_from_thread(self.query_one("#fingerprint", Static).update, f"Fingerprint: {fingerprint[:32]}...")
+            self.app.call_from_thread(self._set_allow_visible, True)
         except Exception:
             pass
         self._approve_event.wait(timeout=300)
+        try:
+            self.app.call_from_thread(self._set_allow_visible, False)
+        except Exception:
+            pass
         return self._approved
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "allow":
             self._approved = True
             self._approve_event.set()
+            self._set_allow_visible(False)
         elif event.button.id == "deny":
             self._approved = False
             self._approve_event.set()
+            self._set_allow_visible(False)
         elif event.button.id == "back":
             if self._listener is not None:
                 self._listener.stop()
             self.app.pop_screen()
 
     def on_mount(self) -> None:
+        try:
+            self._allow_btn = self.query_one("#allow", Button)
+            self._deny_btn = self.query_one("#deny", Button)
+        except Exception:
+            pass
+        self._set_allow_visible(False)
         focus_first(self)
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -87,15 +113,14 @@ class JoinScreen(Screen):
                 self.config.session_port, self.cwd, device=socket.gethostname(),
                 approve=self._approve,
             )
-            session = self._listener.wait_for_creator(exchange_ssh_keys=True)
+            session = self._listener.wait_for_creator()
             if self._pending is not None:
                 device, fp = self._pending
                 if self.config.peer_for(device) is None:
                     add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
-            self.app.call_from_thread(self._set_status, "SSH session live, opening...")
-            from .ssh_session import SSHSessionScreen
-
-            self.app.call_from_thread(self.app.push_screen, SSHSessionScreen(session, "joiner"))
+            self.app.call_from_thread(self._set_status, "Session live, opening...")
+            from .session_screen import SessionScreen
+            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
         except Exception as exc:
             self.app.call_from_thread(self._set_status, f"Failed: {exc}")
 
