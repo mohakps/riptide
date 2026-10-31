@@ -1,12 +1,12 @@
-"""Saved connections and settings.
+"""Saved connections and settings, v2.
 
 Location is always Path.home() / ".riptide" / "config.toml", on every OS.
-Private keys are never stored here. If a value looks like a private key,
-saving it is refused.
+Private keys and certificates are never stored here. A peer is identified
+by host + TLS certificate fingerprint, approved in the UI on first connect.
+Pairing codes are gone in v2; there is no pairing port.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,10 +15,8 @@ try:
 except ModuleNotFoundError:  # Python < 3.11, not supported by pyproject
     import tomli as tomllib  # type: ignore
 
-# Standard SSH port. Kept in code/config only; the UI never renders it.
-DEFAULT_SSH_PORT = 22
-# Internal pairing listener port. Also never rendered in the UI.
-DEFAULT_PAIRING_PORT = 49871
+# Internal session port. Kept in code/config only; the UI never renders it.
+DEFAULT_SESSION_PORT = 49872
 
 
 def config_dir(home: Path | None = None) -> Path:
@@ -32,24 +30,23 @@ def config_path(home: Path | None = None) -> Path:
 @dataclass
 class Peer:
     name: str
-    user: str
-    host: str
+    user: str = ""
+    host: str = ""
     fingerprint: str = ""
     allow_always: bool = False
 
     def label(self) -> str:
-        return f"{self.user}@{self.host}"
+        return self.host or self.name
 
 
 @dataclass
 class Config:
     peers: list[Peer] = field(default_factory=list)
-    ssh_port: int = DEFAULT_SSH_PORT
-    pairing_port: int = DEFAULT_PAIRING_PORT
+    session_port: int = DEFAULT_SESSION_PORT
 
-    def peer_for(self, user: str, host: str) -> Peer | None:
+    def peer_for(self, host: str, user: str = "") -> Peer | None:
         for peer in self.peers:
-            if peer.user == user and peer.host == host:
+            if peer.host == host:
                 return peer
         return None
 
@@ -81,17 +78,12 @@ def load_config(home: Path | None = None) -> Config:
             fingerprint=str(item.get("fingerprint", "")),
             allow_always=bool(item.get("allow_always", False)),
         ))
-    ssh_port = data.get("ssh_port", DEFAULT_SSH_PORT)
-    pairing_port = data.get("pairing_port", DEFAULT_PAIRING_PORT)
+    session_port = data.get("session_port", DEFAULT_SESSION_PORT)
     try:
-        ssh_port = int(ssh_port)
+        session_port = int(session_port)
     except Exception:
-        ssh_port = DEFAULT_SSH_PORT
-    try:
-        pairing_port = int(pairing_port)
-    except Exception:
-        pairing_port = DEFAULT_PAIRING_PORT
-    return Config(peers=peers, ssh_port=ssh_port, pairing_port=pairing_port)
+        session_port = DEFAULT_SESSION_PORT
+    return Config(peers=peers, session_port=session_port)
 
 
 def save_config(config: Config, home: Path | None = None) -> Path:
@@ -101,7 +93,7 @@ def save_config(config: Config, home: Path | None = None) -> Path:
                 raise ValueError("refusing to store a private key in config")
     directory = config_dir(home)
     directory.mkdir(parents=True, exist_ok=True)
-    lines = [f'ssh_port = {int(config.ssh_port)}', f'pairing_port = {int(config.pairing_port)}', ""]
+    lines = [f"session_port = {int(config.session_port)}", ""]
     for peer in config.peers:
         lines.append("[[peer]]")
         lines.append(f'name = "{_escape(peer.name)}"')
@@ -116,7 +108,7 @@ def save_config(config: Config, home: Path | None = None) -> Path:
 
 
 def add_peer(config: Config, peer: Peer, home: Path | None = None) -> Config:
-    existing = config.peer_for(peer.user, peer.host)
+    existing = config.peer_for(peer.host) if peer.host else None
     if existing is not None:
         existing.name = peer.name or existing.name
         existing.fingerprint = peer.fingerprint or existing.fingerprint
