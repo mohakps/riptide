@@ -22,15 +22,14 @@ import threading
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Input, Static
 
 from ..core.config import Peer, add_peer, load_config
 from ..core.focus import focus_first, handle_arrow_key
 from ..core.session import create_session, parse_host_input
-from ..theme import HEADER_LINES
-
+from ..theme import HEADER_LINES, TAGLINES
 
 class CreateScreen(Screen):
     def __init__(self) -> None:
@@ -43,19 +42,19 @@ class CreateScreen(Screen):
         self._deny_btn: Button | None = None
 
     def compose(self) -> ComposeResult:
+        peers = [Button(p.host, id=f"peer_{i}") for i, p in enumerate(self.config.peers) if p.host]
         yield Vertical(
-            Static("\n".join(HEADER_LINES), classes="header"),
-            Static("CREATE SERVER", classes="accent"),
-            Static("Past hosts: tap one to fill the address, or type a new one.", classes="dim"),
-            *[Button(p.host, id=f"peer_{i}") for i, p in enumerate(self.config.peers) if p.host],
+            Static("CREATE SERVER", classes="screen-title"),
+            Static(TAGLINES["create"], classes="screen-desc"),
+            Static("Recent peers · select to autofill destination:", classes="dim") if peers else Static(""),
+            Horizontal(*peers) if peers else Static(""),
             Input(placeholder="Joiner address: hostname, IPv4, or IPv6", id="host"),
             Static("Status: idle", id="status"),
             Static("", id="fingerprint"),
-            Button("Create", id="create"),
-            Button("Allow", id="allow"),
-            Button("Deny", id="deny"),
-            Button("Back", id="back"),
-            Static("You dial out, so this works from behind CGNAT. No code to type.", classes="dim"),
+            Button("Create Server", id="create", classes="primary"),
+            Button("Allow", id="allow", classes="allow"),
+            Button("Deny", id="deny", classes="deny"),
+            Static("[Enter] Connect   [Esc] Back", classes="keymap-bar"),
         )
 
     def _set_allow_visible(self, visible: bool) -> None:

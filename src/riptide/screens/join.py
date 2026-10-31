@@ -22,7 +22,7 @@ from textual.widgets import Button, Static
 from ..core.config import Peer, add_peer, load_config
 from ..core.focus import focus_first, handle_arrow_key
 from ..core.session import JoinListener
-from ..theme import HEADER_LINES
+from ..theme import HEADER_LINES, TAGLINES
 
 
 class JoinScreen(Screen):
@@ -39,16 +39,15 @@ class JoinScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("\n".join(HEADER_LINES), classes="header"),
-            Static("JOIN SERVER", classes="accent"),
+            Static("JOIN SERVER", classes="screen-title"),
+            Static(TAGLINES["join"], classes="screen-desc"),
             Static("Waiting for a creator. Keep this screen open.", classes="success"),
             Static("Share your address with the creator. They dial you, you do not dial them.", classes="dim"),
             Static("No incoming session yet.", id="incoming"),
             Static("", id="fingerprint"),
-            Button("Allow", id="allow"),
-            Button("Deny", id="deny"),
-            Button("Back", id="back"),
-            Static("If you are the public side, your router must forward to this machine once. No code to type.", classes="dim"),
+            Button("Allow", id="allow", classes="allow"),
+            Button("Deny", id="deny", classes="deny"),
+            Static("[Esc] Back", classes="keymap-bar"),
         )
 
     def _set_allow_visible(self, visible: bool) -> None:

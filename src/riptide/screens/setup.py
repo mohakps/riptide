@@ -12,8 +12,7 @@ from ..core import nat as nat_mod
 from ..core.focus import focus_first, handle_arrow_key
 from ..core.setup_linux import run_setup as linux_setup, steps as linux_steps
 from ..core.setup_windows import run_setup as windows_setup, steps as windows_steps
-from ..theme import HEADER_LINES
-
+from ..theme import HEADER_LINES, TAGLINES
 
 class SetupScreen(Screen):
     def compose(self) -> ComposeResult:
@@ -21,15 +20,15 @@ class SetupScreen(Screen):
         steps = windows_steps() if system == "Windows" else linux_steps()
         step_text = "\n".join(f"- {s['title']}: {s['detail']}" for s in steps)
         yield Vertical(
-            Static("\n".join(HEADER_LINES), classes="header"),
-            Static("SET-UP SSH", classes="accent"),
+            Static("ENVIRONMENT & NETWORK SETUP", classes="screen-title"),
+            Static(TAGLINES["setup"], classes="screen-desc"),
             Static(f"Detected system: {system}", classes="dim"),
             Static(step_text),
             Static("Output:", classes="accent"),
             Static("Not run yet.", id="output"),
-            Button("Run set-up", id="run"),
+            Button("Run set-up", id="run", classes="primary"),
             Button("Try automatic forwarding", id="upnp"),
-            Button("Back", id="back"),
+            Static("[Esc] Back", classes="keymap-bar"),
             Static(nat_mod.REVERSE_MODE_TEXT, classes="dim"),
             Static(nat_mod.manual_instructions(nat_mod.local_ip()), classes="dim"),
         )
