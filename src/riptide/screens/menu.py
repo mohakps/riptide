@@ -12,7 +12,7 @@ class MenuScreen(Screen):
         yield Vertical(
             Static("\n".join(HEADER_LINES), classes="header"),
             Static("Direct, encrypted file transfer. No cloud in the middle.", classes="subheader"),
-            Button("Send", id="send", variant="primary"),
+            Button("Send", id="send"),
             Button("Receive", id="receive"),
             Button("Set-up SSH", id="setup"),
             Button("Exit", id="exit"),

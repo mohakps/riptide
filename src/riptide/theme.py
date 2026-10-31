@@ -36,15 +36,55 @@ Static, Label {
     color: #AAAAAA;
     text-align: center;
 }
+/* Every button, focused or not, has exactly the same box:
+   same width, same height (3 rows), same border, same padding.
+   The ONLY change on focus is the fill colour and the text colour.
+   text-style must be none, not reverse: Textual's built-in
+   Button:focus rule uses reverse, which swaps the label's colours
+   back and paints a dark rectangle behind the text. */
 Button {
+    width: 100%;
+    height: 3;
+    min-width: 0;
+    padding: 0;
+    margin: 1 2;
     border: solid #FF6B6B;
     background: #2A2A2A;
     color: #E8E8E8;
-    margin: 0 2;
+    text-style: bold;
+    text-align: center;
+    content-align: center middle;
+    tint: transparent;
+    background-tint: transparent;
 }
 Button:focus {
+    width: 100%;
+    height: 3;
+    min-width: 0;
+    padding: 0;
+    margin: 1 2;
+    border: solid #FF6B6B;
     background: #FF6B6B;
     color: #1E1E1E;
+    text-style: bold;
+    tint: transparent;
+    background-tint: transparent;
+}
+Button:hover, Button.-active {
+    width: 100%;
+    height: 3;
+    padding: 0;
+    margin: 1 2;
+    border: solid #FF6B6B;
+    tint: transparent;
+    background-tint: transparent;
+}
+Button:focus:hover {
+    background: #FF6B6B;
+    color: #1E1E1E;
+    text-style: bold;
+    tint: transparent;
+    background-tint: transparent;
 }
 Input {
     border: solid #FF6B6B;
