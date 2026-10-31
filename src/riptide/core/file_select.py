@@ -5,7 +5,7 @@ path text into the input, so both methods feed the same Selected list.
 This module is deliberately stdlib-only so it is easy to test.
 """
 from __future__ import annotations
-
+from datetime import datetime
 import re
 import shlex
 from pathlib import Path
@@ -29,6 +29,17 @@ def total_size(paths: list[Path]) -> int:
         except OSError:
             pass
     return total
+
+def format_mtime(mtime: float) -> str:
+    """Format modification timestamp as strictly dd-mm-yyyy hh:mm am/pm in lowercase."""
+    dt = datetime.fromtimestamp(mtime)
+    return dt.strftime("%d-%m-%Y %I:%M %p").lower()
+
+
+def format_file_row(path: Path) -> tuple[str, str, str]:
+    """Return (filename, size_str, mtime_str) for displaying in file tables."""
+    stat = path.stat()
+    return path.name, format_bytes(stat.st_size), format_mtime(stat.st_mtime)
 
 
 def _split_pasted(text: str) -> list[str]:
