@@ -146,4 +146,23 @@ ProgressBar {
 ProgressBar > .bar--bar {
     background: #FF6B6B;
 }
+OptionList {
+    background: transparent;
+    border: none;
+    padding: 1 2;
+    height: auto;
+}
+OptionList:focus {
+    border: none;
+}
+OptionList > .option-list--option {
+    padding: 0 1;
+    background: transparent;
+    color: #E8E8E8;
+}
+OptionList > .option-list--option-highlighted {
+    background: transparent;
+    color: #FF6B6B;
+    text-style: bold;
+}
 """

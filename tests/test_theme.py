@@ -5,6 +5,10 @@ def test_css_is_transparent():
     assert "background: transparent" in CSS
     assert "#1E1E1E" not in CSS
     assert "#2A2A2A" not in CSS
+    assert "OptionList {" in CSS
+    assert "OptionList:focus {" in CSS
+    assert "OptionList > .option-list--option {" in CSS
+    assert "OptionList > .option-list--option-highlighted {" in CSS
 
 
 def test_ansi_header_present():
