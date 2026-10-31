@@ -27,7 +27,7 @@ riptide --version
 
 ## Usage, v3: Create Server / Join Server, over SSH
 
-Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in the menu in v3; SSH servers must already be running on both sides (from the v1 set-up, or installed manually).
+Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in the menu in v3; Only the public joiner needs an SSH server running (from the v1 set-up, or installed manually). The CGNAT creator only needs an SSH client, which riptide includes.
 
 There is no pairing code in v3, and no Send / Receive menu. File direction is independent of who created or joined.
 
