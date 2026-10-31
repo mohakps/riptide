@@ -14,8 +14,8 @@ from ..theme import HEADER_BANNER, TAGLINES
 class MenuScreen(Screen):
     def compose(self) -> ComposeResult:
         options = [
-            Option("❯  Create Server      Dial out to peer · bypasses CGNAT", id="create"),
-            Option("   Join Server        Wait for incoming session and authorize peer", id="join"),
+            Option("❯  Create Server      Dial out to peer (Required for CGNAT)", id="create"),
+            Option("   Join Server        Wait for incoming session (Requires Port Forwarding)", id="join"),
         ]
         yield Vertical(
             Static(HEADER_BANNER, classes="header"),
@@ -39,8 +39,8 @@ class MenuScreen(Screen):
         try:
             opt_list = self.query_one("#menu_list", OptionList)
             prompts = [
-                ("create", "Create Server", "Dial out to peer · bypasses CGNAT"),
-                ("join", "Join Server", "Wait for incoming session and authorize peer"),
+                ("create", "Create Server", "Dial out to peer (Required for CGNAT)"),
+                ("join", "Join Server", "Wait for incoming session (Requires Port Forwarding)"),
             ]
             for idx, (oid, title, desc) in enumerate(prompts):
                 prefix = "❯  " if idx == event.option_index else "   "
