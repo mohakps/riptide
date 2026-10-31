@@ -6,9 +6,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from riptide import __version__
 from riptide.core.file_select import (
     add_to_selection,
+    common_prefix,
     complete,
+    format_browser_row,
     format_file_row,
     format_mtime,
+    list_browser_entries,
     parse_dropped_text,
     total_size,
 )
@@ -47,6 +50,38 @@ def test_complete(tmp_path):
     assert complete("de", tmp_path) == ["demo.mp4"]
     assert complete("n", tmp_path) == ["notes.txt"]
     assert complete("zzz", tmp_path) == []
+
+
+def test_complete_absolute_path_keeps_directory(tmp_path):
+    (tmp_path / "document.pdf").write_text("x")
+    (tmp_path / "other.txt").write_text("x")
+    # Old bug: this returned ["document.pdf"], losing the directory.
+    assert complete(str(tmp_path / "doc"), tmp_path) == [str(tmp_path / "document.pdf")]
+    assert complete(str(tmp_path) + "/", tmp_path) == [
+        str(tmp_path / "document.pdf"),
+        str(tmp_path / "other.txt"),
+    ]
+
+
+def test_common_prefix():
+    assert common_prefix(["/a/doc1", "/a/doc2"]) == "/a/doc"
+    assert common_prefix(["abc", "abd"]) == "ab"
+    assert common_prefix([]) == ""
+
+
+def test_browser_entries_folders_first_no_size_date(tmp_path):
+    (tmp_path / "zfile.txt").write_text("x")
+    (tmp_path / "afolder").mkdir()
+    (tmp_path / "bfile.txt").write_text("x")
+    entries = list_browser_entries(tmp_path)
+    assert entries[0].name == "afolder"
+    assert entries[0].is_dir()
+    display, size, mtime = format_browser_row(tmp_path / "afolder")
+    assert display == "📁 afolder/"
+    assert size == "" and mtime == ""
+    display, size, mtime = format_browser_row(tmp_path / "zfile.txt")
+    assert display == "zfile.txt"
+    assert size and mtime
 
 def test_dynamic_version_matches_pyproject():
     import tomllib

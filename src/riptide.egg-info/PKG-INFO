@@ -1,0 +1,100 @@
+Metadata-Version: 2.4
+Name: riptide
+Version: 0.5.0
+Summary: Direct, encrypted PC-to-PC file transfer in the terminal. No cloud upload, no website in the data path.
+Author: riptide
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: textual>=0.86
+Requires-Dist: cryptography>=42
+Requires-Dist: paramiko>=3.4
+
+# riptide
+
+Direct, encrypted PC-to-PC file transfer in the terminal. No cloud upload, no website in the data path.
+
+```
+          Ψ  R I P T I D E  Ψ
+     ~~~  direct file transfer  ~~~
+```
+
+Theme: dark grey background, bright soft red accent. The UI never displays a port number.
+
+## Install (GitHub only, no PyPI)
+
+The name is tentative, so this is not published to PyPI.
+
+```sh
+pipx install git+https://github.com/mohakps/riptide
+```
+
+Then, from any folder you want to share from or receive into:
+
+```sh
+riptide
+riptide --help
+riptide --version
+```
+
+## Usage, v4: Create Server / Join Server, over TLS
+
+Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in the menu in v4.
+
+There is no pairing code in v4, and no Send / Receive menu. File direction is independent of who created or joined. v4 rolls back from v3 SSH to TLS, because SSH added too much complication for this pair.
+
+### The one networking rule
+
+The CGNAT side must be the side that dials out. "Create" and "Join" are session roles, not network roles. Calling the CGNAT side "server" does not make it reachable.
+
+### Create Server (CGNAT side, if one side is CGNAT)
+
+1. Past hosts are shown as buttons: tap one to fill the address, or type a new one. The address can be a hostname, an IPv4 address, or an IPv6 address (with or without brackets). `user@host` is also accepted, the host part is used.
+2. Your riptide dials the joiner's TLS listener. Outbound from CGNAT works, return traffic is allowed back.
+3. On first connect, the joiner's certificate fingerprint is shown and you press Allow to trust it, or Deny to abort. Allow/Deny are hidden until a fingerprint actually needs approval. A changed fingerprint aborts instead of silently trusting a new host.
+4. You are now in a session. Either side can send or download from here.
+
+### Join Server (public side, if one side is CGNAT)
+
+1. Open Join Server and keep it open. You do not dial the creator, because the creator may be behind CGNAT and unreachable.
+2. When the creator dials in, Allow/Deny appear, only then. Press Allow to accept the session. They are hidden before an incoming request.
+3. You are now in the same session. Either side can send or download from here.
+
+### In a session
+
+- Send selected: pick local files (type a name, Tab to complete, Enter to add, or paste dropped paths), they go to the other side's folder where riptide was launched.
+- Download remote file: type a remote file name, it comes to your folder.
+- Speed is shown while sending, computed from bytes sent and elapsed time, with remaining size and ETA.
+- The receiver sees progress too: received bytes, total, speed, remaining, and ETA are shown on the receiving side, not just the sending side.
+- The session does not cut off when idle: the socket timeout that caused a 30-second idle cut-off in v2 is cleared, TCP keepalive is enabled, and a heartbeat ping is sent every 10 seconds.
+- Files are written with a `.part` suffix and renamed only after SHA-256 matches. A mismatch is reported and kept as `.part`, not renamed.
+
+### One-time network step for the public side
+
+If the joiner is the public side, their router must forward the riptide session port to their machine once. The internal session port is 49872 (it is never shown in the UI). The CGNAT side needs no port forward. If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
+
+Saved peers live in `~/.riptide/config.toml` (on Windows, the `.riptide` folder under your home directory). That file contains hosts and fingerprints only, never private keys. TLS identity keys live under `~/.riptide/` with the key file at 0600.
+
+## Security notes, v4
+
+- Sessions are TLS-encrypted, with a self-signed identity per machine.
+- On first connect, the creator checks the joiner's certificate fingerprint and presses Allow; a changed fingerprint aborts the session instead of silently trusting the new host.
+- No pairing code, no pairing listener, no public key pasting, no password sharing.
+- Partial files stay as `.part` until verified, so a failed transfer does not look like a complete file.
+
+## Limitations in v4
+
+- Files only, no folders.
+- If both sides are CGNAT on IPv4 and neither has IPv6, this model does not work on its own: a reachable third peer or relay would be needed.
+- Live two-machine CGNAT testing over TLS is still needed for the v4 fixes (speed, receiver progress, Allow/Deny visibility, idle heartbeat). Localhost tests pass for both directions, download, receiver progress, host parsing, and fingerprint-change abort.
+- Set-up SSH from v1 is present in the code but disabled in the menu in v4. v4 does not use SSH for transfers.
+
+## Development
+
+```sh
+python -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest -q
+python -m compileall src/riptide
+```

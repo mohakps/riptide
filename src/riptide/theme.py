@@ -159,17 +159,36 @@ Static, Label {
     color: #E8E8E8;
     text-style: bold;
 }
-/* Input fields */
+/* Input fields, antigravity-cli style: a bordered composer box
+   with a dim label above it and a hint below it, not a bare
+   input. Placeholder text is grey, focus border is the accent. */
 Input {
     border: round #3F3F46;
     background: transparent;
     color: #E8E8E8;
     height: 3;
     padding: 0 1;
-    margin: 1 0;
+    margin: 0 0 1 0;
 }
 Input:focus {
     border: round #FF6B6B;
+}
+Input > .input--placeholder {
+    color: #71717A;
+}
+.composer-label {
+    color: #71717A;
+    text-style: bold;
+    padding: 1 0 0 0;
+}
+.composer-hint {
+    color: #71717A;
+    padding: 0 0 1 0;
+}
+.composer {
+    padding: 0 1 1 1;
+    margin: 1 0;
+    background: transparent;
 }
 /* Buttons - streamlined, non-bulky */
 Button {
@@ -250,19 +269,33 @@ ListItem {
 ListItem.--highlight {
     background: transparent;
 }
-ListItem.--highlight .file-name {
-    color: #FF6B6B;
-    text-style: bold;
-}
 .file-row {
     width: 100%;
     height: 1;
     layout: horizontal;
     background: transparent;
 }
+/* File manager colours, in priority order:
+   remaining files grey, selected files accent, and the hovered
+   (highlighted) row pure white, even if it is also selected.
+   The --highlight rules come last so hover wins over selected. */
 .file-name {
     width: 1fr;
-    color: #E8E8E8;
+    color: #71717A;
+}
+ListItem.selected .file-name {
+    color: #FF6B6B;
+    text-style: bold;
+}
+ListItem.selected .file-size,
+ListItem.selected .file-mtime {
+    color: #71717A;
+}
+ListItem.--highlight .file-name,
+ListItem.--highlight .file-size,
+ListItem.--highlight .file-mtime {
+    color: #FFFFFF;
+    text-style: bold;
 }
 .file-size {
     width: 12;

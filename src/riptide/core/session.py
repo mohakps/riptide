@@ -126,7 +126,8 @@ def _send_header(sock, header: dict) -> None:
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
                  on_file_received=None, on_ack=None, on_status=None, on_error=None,
-                 on_ssh_download_request=None, on_progress=None):
+                 on_ssh_download_request=None, on_progress=None,
+                 on_download_ask=None, on_download_denied=None):
         self.sock = sock
         self.cwd = Path(cwd)
         self.device = device
@@ -138,6 +139,8 @@ class Session:
         self.on_status = on_status
         self.on_error = on_error
         self.on_progress = on_progress
+        self.on_download_ask = on_download_ask
+        self.on_download_denied = on_download_denied
         self._send_lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -174,8 +177,11 @@ class Session:
         return True
 
     def request_file(self, name: str) -> bool:
-        # Only the header is sent here; the file itself arrives as a
-        # normal file message and is handled by the reader loop.
+        # Legacy direct request: only a file in this side's cwd,
+        # by basename. Kept for tests and old clients. The UI
+        # no longer uses this for downloads; it uses
+        # request_download() below, which asks for approval and
+        # allows absolute paths.
         with self._send_lock:
             try:
                 _send_header(self.sock, {"type": "request", "name": name})
@@ -184,6 +190,39 @@ class Session:
                     self.on_error(f"request failed: {exc}")
                 return False
         return True
+
+    def request_download(self, name: str, request_id: str = "") -> bool:
+        """Ask the peer for approval to download a file.
+
+        ``name`` may be absolute (a path on the peer) or relative
+        to the peer's cwd. Nothing is sent until the peer allows
+        it; the file then arrives as a normal file message."""
+        with self._send_lock:
+            try:
+                _send_header(self.sock, {"type": "download_ask", "name": name, "id": request_id})
+            except Exception as exc:
+                if self.on_error is not None:
+                    self.on_error(f"download request failed: {exc}")
+                return False
+        return True
+
+    def respond_download(self, name: str, request_id: str, allow: bool) -> bool:
+        """Peer side: answer a download_ask. On allow, send the
+        file (absolute path, or relative to this side's cwd).
+        On deny, tell the requester, and send nothing."""
+        if not allow:
+            with self._send_lock:
+                try:
+                    _send_header(self.sock, {"type": "download_denied", "name": name, "id": request_id})
+                except Exception:
+                    pass
+            return True
+        path = Path(name).expanduser()
+        if not path.is_absolute():
+            path = self.cwd / path
+        # send_file only sends files, and its header carries only
+        # the basename, so the receiver saves it in its own cwd.
+        return self.send_file(path)
 
     def send_ack(self, name: str, ok: bool, reason: str = "") -> None:
         with self._send_lock:
@@ -249,6 +288,12 @@ class Session:
                     self._receive_file(header)
                 elif kind == "request":
                     self._handle_request(header.get("name", ""))
+                elif kind == "download_ask":
+                    if self.on_download_ask is not None:
+                        self.on_download_ask(str(header.get("name", "")), str(header.get("id", "")))
+                elif kind == "download_denied":
+                    if self.on_download_denied is not None:
+                        self.on_download_denied(str(header.get("name", "")), str(header.get("id", "")))
                 elif kind == "ack":
                     if self.on_ack is not None:
                         self.on_ack(header.get("name", ""), bool(header.get("ok")), header.get("reason", ""))

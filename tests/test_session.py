@@ -117,3 +117,45 @@ def test_fingerprint_change_aborts(tmp_path):
         assert False, "changed fingerprint should abort"
     except Exception as exc:
         assert "fingerprint changed" in str(exc)
+
+
+def test_download_ask_requires_peer_allow(tmp_path):
+    import socket as _socket
+    def _free():
+        with _socket.socket() as s:
+            s.bind(("127.0.0.1", 0)); return s.getsockname()[1]
+    creator_dir = tmp_path / "c3"; joiner_dir = tmp_path / "j3"
+    creator_dir.mkdir(); joiner_dir.mkdir()
+    secret = joiner_dir / "secret.txt"; secret.write_text("peer file")
+    port = _free()
+    asked = {}
+    join_session = {}
+    def join_worker():
+        listener = JoinListener(port, joiner_dir, device="joiner", home=tmp_path / "jh3", approve=lambda d, fp: True)
+        s = listener.wait_for_creator()
+        s.on_download_ask = lambda n, rid: asked.update({"name": n, "id": rid, "session": s})
+        s.start(); join_session["s"] = s
+    t = threading.Thread(target=join_worker, daemon=True); t.start(); time.sleep(0.5)
+    creator = create_session("127.0.0.1", port, creator_dir, device="creator", home=tmp_path / "ch3", approve_fingerprint=lambda fp: True)
+    creator.start(); time.sleep(0.5)
+    # Absolute path on the peer, via approval flow.
+    assert creator.request_download(str(secret), request_id="req-1")
+    time.sleep(1)
+    assert asked.get("name") == str(secret)
+    # No file yet, before approval.
+    assert not (creator_dir / "secret.txt").exists()
+    # Peer allows: file arrives.
+    assert join_session["s"].respond_download(asked["name"], asked["id"], True)
+    time.sleep(1)
+    assert (creator_dir / "secret.txt").read_text() == "peer file"
+    # Deny path: second file is not sent.
+    denied = {}
+    creator.on_download_denied = lambda n, rid: denied.update({"name": n})
+    (joiner_dir / "nope.txt").write_text("no")
+    assert creator.request_download(str(joiner_dir / "nope.txt"), request_id="req-2")
+    time.sleep(1)
+    assert join_session["s"].respond_download(str(joiner_dir / "nope.txt"), "req-2", False)
+    time.sleep(1)
+    assert denied.get("name") == str(joiner_dir / "nope.txt")
+    assert not (creator_dir / "nope.txt").exists()
+    creator.close(); join_session["s"].close()

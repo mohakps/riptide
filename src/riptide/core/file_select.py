@@ -104,15 +104,42 @@ def add_to_selection(selection: list[Path], new: list[Path]) -> list[Path]:
 
 
 def complete(prefix: str, cwd: Path) -> list[str]:
-    """Tab completion candidates for a prefix, relative to cwd."""
+    """Tab completion candidates for a prefix, relative or absolute.
+
+    Absolute paths used to be broken: the old code returned only
+    the bare entry name for an absolute prefix, so completing
+    ``/home/user/doc`` replaced the input with ``document.pdf``
+    and lost the directory. Now the returned candidate keeps
+    the full absolute prefix, including a trailing slash when
+    the prefix itself ends in a separator.
+    """
     prefix = prefix.strip()
     if not prefix:
         return []
+    if prefix.startswith("~"):
+        prefix = str(Path(prefix).expanduser())
+    sep = "\\" if "\\" in prefix else "/"
+    # Trailing separator: complete inside that directory.
+    if prefix.endswith(("/", "\\")):
+        directory = Path(prefix).expanduser()
+        if re.match(r"^[A-Za-z]:[\\/]", prefix):
+            directory = Path(prefix)
+        stem = ""
+        base = prefix
+        if not directory.is_dir():
+            return []
+        return [f"{base}{e.name}{'/' if e.is_dir() else ''}"
+                for e in sorted(directory.iterdir(), key=lambda p: p.name.lower())]
     raw = Path(prefix)
-    if raw.is_absolute():
+    is_win_abs = bool(re.match(r"^[A-Za-z]:[\\/]", prefix))
+    if raw.is_absolute() or is_win_abs:
         directory = raw.parent
         stem = raw.name
-        base = ""
+        # Keep the absolute directory in the candidate, e.g.
+        # /home/user/do -> /home/user/document.pdf
+        base = str(directory)
+        if not base.endswith(("/", "\\")):
+            base += sep
     else:
         if "/" in prefix or "\\" in prefix:
             directory = cwd / raw.parent
@@ -122,6 +149,10 @@ def complete(prefix: str, cwd: Path) -> list[str]:
             directory = cwd
             stem = prefix
             base = ""
+    try:
+        directory = directory.expanduser()
+    except Exception:
+        pass
     if not directory.is_dir():
         return []
     out: list[str] = []
@@ -130,6 +161,46 @@ def complete(prefix: str, cwd: Path) -> list[str]:
             suffix = "/" if entry.is_dir() else ""
             out.append(f"{base}{entry.name}{suffix}")
     return out
+
+
+def common_prefix(candidates: list[str]) -> str:
+    """Longest common prefix of all candidates, or '' if none."""
+    if not candidates:
+        return ""
+    prefix = candidates[0]
+    for cand in candidates[1:]:
+        while not cand.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ""
+    return prefix
+
+
+def list_browser_entries(directory: Path) -> list[Path]:
+    """File-manager entries for a directory: folders first, then
+    files, each group alphabetical. Hidden entries are kept, as
+    the old file list did."""
+    if not directory.is_dir():
+        return []
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return []
+    folders = sorted((p for p in entries if p.is_dir()), key=lambda p: p.name.lower())
+    files = sorted((p for p in entries if p.is_file()), key=lambda p: p.name.lower())
+    return folders + files
+
+
+def format_browser_row(path: Path) -> tuple[str, str, str]:
+    """Display row for the file manager: (display, size, mtime).
+
+    Folders get a folder icon and a trailing slash, and no size
+    or date: ``📁 docs/`` with empty size/mtime. Files keep the
+    old name / size / mtime format."""
+    if path.is_dir():
+        return f"📁 {path.name}/", "", ""
+    name, size, mtime = format_file_row(path)
+    return name, size, mtime
 
 
 def list_cwd_files(cwd: Path) -> list[Path]:

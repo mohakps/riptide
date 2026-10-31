@@ -1,0 +1,2 @@
+[console_scripts]
+riptide = riptide.app:main
