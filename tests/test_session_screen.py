@@ -9,8 +9,7 @@ from textual.widgets import Button, Input, Label, ListView, ProgressBar, Static
 
 from riptide.core.file_select import format_file_row
 from riptide.screens.session_screen import SessionScreen, _truncate_filename
-from riptide.theme import BANNER_HOST, TAGLINES
-
+from riptide.theme import BANNER_HOST, CSS, TAGLINES
 
 class DummySession:
     def __init__(self, cwd: Path):
@@ -39,11 +38,12 @@ class DummySession:
 
 
 class SessionTestApp(App):
+    CSS = CSS
+
     def __init__(self, session, role="creator"):
         super().__init__()
         self.test_session = session
         self.role = role
-
     def on_mount(self):
         self.push_screen(SessionScreen(self.test_session, self.role))
 
@@ -248,6 +248,10 @@ async def test_session_screen_overall_progress_and_metrics_layout(tmp_path):
     async with app.run_test() as pilot:
         screen = app.screen
 
+        # Progress section is initially hidden when no transfer
+        prog_sec = screen.query_one("#progress_section")
+        assert prog_sec.styles.display == "none"
+
         # Trigger progress update
         screen._on_progress(
             name="very_long_movie_name_bleach_episode_test.mkv",
@@ -259,9 +263,11 @@ async def test_session_screen_overall_progress_and_metrics_layout(tmp_path):
         )
         await pilot.pause()
 
+        # Progress section becomes visible during transfer
+        assert prog_sec.styles.display == "block"
+
         bar = screen.query_one("#bar", ProgressBar)
         assert bar.progress == 75.0  # 1500 / 2000 * 100
-
         # Metrics row
         metric_speed = screen.query_one("#metric_speed", Label).render().plain
         metric_trans = screen.query_one("#metric_transferred", Label).render().plain
@@ -278,6 +284,41 @@ async def test_session_screen_overall_progress_and_metrics_layout(tmp_path):
         assert "Sending:" in file_name_label
         assert "500 B / 1000 B" in file_size_label or "B" in file_size_label
 
+
+@pytest.mark.asyncio
+async def test_session_screen_focused_item_is_pure_white(tmp_path):
+    """Focused/highlighted item must appear pure white (#FFFFFF, bold)."""
+    (tmp_path / "item1.txt").write_bytes(b"hello")
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        lv = screen.query_one("#cwd_list", ListView)
+        lv.focus()
+        await pilot.pause()
+        child = lv.highlighted_child
+        fn_label = child.query_one(".file-name")
+        assert fn_label.styles.color.hex.upper() == "#FFFFFF"
+        assert "bold" in str(fn_label.styles.text_style)
+
+
+@pytest.mark.asyncio
+async def test_session_screen_download_section_and_zero_gaps(tmp_path):
+    """Download section heading and input are present; no ballooning empty gaps."""
+    session = DummySession(tmp_path)
+    app = SessionTestApp(session, role="creator")
+    async with app.run_test() as pilot:
+        screen = app.screen
+        dl_composer = screen.query_one("#download_composer")
+        assert dl_composer is not None
+        labels = [node.render().plain for node in dl_composer.query(Static)]
+        assert any("DOWNLOAD FROM PEER" in l for l in labels)
+        assert dl_composer.query_one("#download_input", Input) is not None
+
+        # Header row is exactly 3 lines high
+        header = screen.query_one("#session_header_row")
+        assert header.styles.height.value == 3
+        assert header.styles.margin.bottom == 0
 
 @pytest.mark.asyncio
 async def test_session_screen_scrollable_and_footer_keys_in_brackets(tmp_path):

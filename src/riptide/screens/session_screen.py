@@ -228,6 +228,7 @@ class SessionScreen(Screen):
                 Static(
                     "Space opens folder / selects file  •  Enter sends files  •  Backspace goes up  •  Tab cycles UI  •  Type to search",
                     classes="dim",
+                    id="browser_hint",
                 ),
                 id="browser_box",
             ),
@@ -308,6 +309,7 @@ class SessionScreen(Screen):
         except Exception:
             pass
         self._set_download_approval_visible(False)
+        self._set_progress_visible(False)
         self._update_header()
         focus_first(self)
 
@@ -324,6 +326,11 @@ class SessionScreen(Screen):
                 except Exception:
                     pass
 
+    def _set_progress_visible(self, visible: bool) -> None:
+        try:
+            self.query_one("#progress_section", Vertical).styles.display = "block" if visible else "none"
+        except Exception:
+            pass
     def _show_next_download_approval(self) -> None:
         if not self._pending_downloads:
             try:
@@ -364,9 +371,9 @@ class SessionScreen(Screen):
             pass
 
     def _on_received(self, name: str, ok: bool, reason: str) -> None:
+        self._set_progress_visible(False)
         self._set_status(f"Received {name}: {'verified' if ok else 'FAILED ' + reason}")
         self._refresh_browser()
-
     def _on_progress(
         self,
         name: str,
@@ -376,6 +383,7 @@ class SessionScreen(Screen):
         batch_total: int,
         direction: str,
     ) -> None:
+        self._set_progress_visible(True)
         if self._overall_transfer.total != batch_total:
             self._overall_transfer = TransferProgress(batch_total)
         self._overall_transfer.update(batch_sent)
@@ -511,11 +519,11 @@ class SessionScreen(Screen):
         self._overall_transfer = TransferProgress(total_batch_size)
 
         def worker():
+            self.app.call_from_thread(self._set_progress_visible, True)
             completed_bytes = 0
             for path in files:
                 file_size = path.stat().st_size if path.is_file() else 0
                 self.app.call_from_thread(self._set_status, f"Sending {path.name}...")
-
                 def on_file_prog(name, sent, single_total):
                     batch_sent = completed_bytes + sent
                     self.app.call_from_thread(
@@ -529,9 +537,9 @@ class SessionScreen(Screen):
                     self._set_status,
                     f"Sent {path.name}" if ok else f"Failed to send {path.name}",
                 )
+            self.app.call_from_thread(self._set_progress_visible, False)
 
         threading.Thread(target=worker, daemon=True).start()
-
     def _download(self, name: str) -> None:
         if self.selection:
             self._set_status("Cannot download while files are selected to send. Send or unselect them first.")

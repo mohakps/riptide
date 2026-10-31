@@ -276,6 +276,7 @@ ListItem {
     background: transparent;
     padding: 0 1;
 }
+ListItem.-highlight,
 ListItem.--highlight {
     background: transparent;
 }
@@ -288,7 +289,7 @@ ListItem.--highlight {
 /* File manager colours, in priority order:
    remaining files grey, selected files accent, and the hovered
    (highlighted) row pure white, even if it is also selected.
-   The --highlight rules come last so hover wins over selected. */
+   The -highlight rules come last so hover/focus wins over selected. */
 .file-name {
     width: 1fr;
     color: #71717A;
@@ -301,13 +302,24 @@ ListItem.selected .file-size,
 ListItem.selected .file-mtime {
     color: #71717A;
 }
+ListItem.-highlight,
 ListItem.--highlight,
+ListItem.-highlight *,
+ListItem.--highlight *,
+ListItem.-highlight Label,
 ListItem.--highlight Label,
+ListItem.-highlight .file-name,
 ListItem.--highlight .file-name,
+ListItem.-highlight .file-size,
 ListItem.--highlight .file-size,
-ListItem.--highlight .file-mtime {
+ListItem.-highlight .file-mtime,
+ListItem.--highlight .file-mtime,
+ListItem.selected.-highlight Label,
+ListItem.selected.--highlight Label,
+ListView:focus > ListItem.-highlight Label,
+ListView:focus > ListItem.--highlight Label {
     color: #FFFFFF !important;
-    text-style: bold;
+    text-style: bold !important;
 }
 .file-size {
     width: 12;
@@ -350,40 +362,62 @@ ListItem.--highlight .file-mtime {
     height: 1fr;
     overflow-y: auto;
     padding: 0;
+    margin: 0;
 }
 #session_header_row {
     width: 100%;
-    height: auto;
+    height: 3;
+    max-height: 3;
     layout: horizontal;
-    margin: 0 0 1 0;
+    margin: 0;
+    padding: 0;
 }
 #session_host_title {
     width: auto;
+    height: 3;
     color: #FF6B6B;
     text-style: bold;
+    padding: 0;
+    margin: 0;
 }
 #session_peer_info {
     width: 1fr;
+    height: 3;
     layout: vertical;
+    padding: 0;
+    margin: 0;
 }
 #peer_client_label {
     width: 100%;
+    height: 1;
     text-align: right;
     color: #E8E8E8;
     text-style: bold;
+    padding: 0;
+    margin: 0;
 }
 #peer_status_label {
     width: 100%;
+    height: 1;
     text-align: right;
+    padding: 0;
     margin: 0;
+}
+#status {
+    width: 100%;
+    height: 1;
+    padding: 0;
+    margin: 0;
+    color: #71717A;
 }
 
 #browser_box {
+    width: 100%;
+    height: auto;
     border: round #3F3F46;
     background: transparent;
     padding: 0 1;
-    margin: 0 0 1 0;
-    height: auto;
+    margin: 0;
 }
 #browser_box:focus-within {
     border: round #FF6B6B;
@@ -392,50 +426,94 @@ ListItem.--highlight .file-mtime {
     width: 100%;
     height: 1;
     layout: horizontal;
-    padding: 0 1;
+    padding: 0;
+    margin: 0;
 }
 #browser_path {
     width: 1fr;
+    height: 1;
     color: #E8E8E8;
     text-style: bold;
+    padding: 0;
+    margin: 0;
 }
 #browser_search_indicator {
     width: auto;
+    height: 1;
     color: #FFD166;
     text-style: bold;
+    padding: 0;
+    margin: 0;
 }
 #browser_separator {
     width: 100%;
     height: 1;
     color: #3F3F46;
+    padding: 0;
+    margin: 0;
 }
 #browser_box ListView#cwd_list {
+    width: 100%;
+    height: 10;
     border: none;
     padding: 0;
-    height: 16;
+    margin: 0;
 }
 #browser_box ListView#cwd_list:focus {
     border: none;
 }
+#browser_hint {
+    width: 100%;
+    height: 1;
+    padding: 0;
+    margin: 0;
+    color: #71717A;
+}
 
-#selected_files_section {
+#selected_files_section,
+#selected_files_list,
+#selected_files_section Vertical {
     width: 100%;
     height: auto;
-    margin: 0 0 1 0;
+    margin: 0;
+    padding: 0;
     background: transparent;
 }
 #selected_header {
     width: 100%;
+    height: 1;
     margin: 0;
-}
-#selected_files_list {
-    width: 100%;
-    height: auto;
-    margin: 0;
+    padding: 0;
 }
 .selected-file-item {
     width: 100%;
+    height: 1;
     color: #FF6B6B;
+    margin: 0;
+    padding: 0;
+}
+
+.composer {
+    width: 100%;
+    height: auto;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
+.composer-label {
+    width: 100%;
+    height: 1;
+    padding: 0;
+    margin: 0;
+    color: #71717A;
+    text-style: bold;
+}
+.composer-hint {
+    width: 100%;
+    height: 1;
+    padding: 0;
+    margin: 0;
+    color: #71717A;
 }
 
 #download_composer.disabled {
@@ -453,17 +531,31 @@ ListItem.--highlight .file-mtime {
 #progress_section {
     width: 100%;
     height: auto;
-    margin: 0 0 1 0;
-}
-#progress_section ProgressBar#bar {
-    width: 100%;
     margin: 0;
+    padding: 0;
+    display: none;
+}
+#progress_section ProgressBar#bar,
+ProgressBar#bar,
+ProgressBar {
+    width: 100% !important;
+    min-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+ProgressBar > Bar {
+    width: 1fr !important;
+}
+ProgressBar > .bar--bar {
+    width: 100% !important;
+    background: #FF6B6B;
 }
 #progress_metrics_row {
     width: 100%;
     height: 1;
     layout: horizontal;
     margin: 0;
+    padding: 0;
 }
 .progress-metric {
     width: 1fr;
@@ -485,14 +577,17 @@ ListItem.--highlight .file-mtime {
     height: 1;
     layout: horizontal;
     margin: 0;
+    padding: 0;
 }
 #progress_file_name {
     width: 1fr;
+    height: 1;
     color: #E8E8E8;
     text-style: bold;
 }
 #progress_file_size {
     width: auto;
+    height: 1;
     text-align: right;
     color: #71717A;
 }
@@ -504,6 +599,7 @@ ListItem.--highlight .file-mtime {
     layout: horizontal;
     background: transparent;
     padding: 0 1;
+    margin: 0;
 }
 .keymap-item {
     width: 1fr;
