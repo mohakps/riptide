@@ -55,12 +55,14 @@ def _send_header(sock, header: dict) -> None:
 
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
-                 on_file_received=None, on_ack=None, on_status=None, on_error=None):
+                 on_file_received=None, on_ack=None, on_status=None, on_error=None,
+                 on_ssh_download_request=None):
         self.sock = sock
         self.cwd = Path(cwd)
         self.device = device
         self.peer_device = peer_device
         self.peer_fingerprint = ""
+        self.on_ssh_download_request = on_ssh_download_request
         self.on_file_received = on_file_received
         self.on_ack = on_ack
         self.on_status = on_status
@@ -118,6 +120,25 @@ class Session:
             except Exception:
                 pass
 
+    def send_ssh_download_request(self, name: str) -> bool:
+        """Control message only: ask the other side to download this
+        file from me via SSH/SFTP. No file bytes travel over TLS here."""
+        with self._send_lock:
+            try:
+                _send_header(self.sock, {"type": "ssh_download_request", "name": name})
+            except Exception as exc:
+                if self.on_error is not None:
+                    self.on_error(f"ssh download request failed: {exc}")
+                return False
+        return True
+
+    def send_info(self, text: str) -> None:
+        with self._send_lock:
+            try:
+                _send_header(self.sock, {"type": "info", "message": text})
+            except Exception:
+                pass
+
     # -- receiving ------------------------------------------------
     def start(self) -> None:
         if self._running:
@@ -142,6 +163,12 @@ class Session:
                 elif kind == "ack":
                     if self.on_ack is not None:
                         self.on_ack(header.get("name", ""), bool(header.get("ok")), header.get("reason", ""))
+                elif kind == "ssh_download_request":
+                    if self.on_ssh_download_request is not None:
+                        self.on_ssh_download_request(str(header.get("name", "")))
+                elif kind == "info":
+                    if self.on_status is not None:
+                        self.on_status(str(header.get("message", "")))
                 elif kind == "bye":
                     break
                 elif kind == "error":
@@ -221,6 +248,38 @@ class Session:
             pass
 
 
+def _read_header(sock) -> dict:
+    raw_len = _recv_exact(sock, 4)
+    (length,) = struct.unpack(">I", raw_len)
+    if length <= 0 or length > 1024 * 1024:
+        raise ConnectionError("bad header length")
+    return json.loads(_recv_exact(sock, length).decode())
+
+
+def exchange_ssh_keys_server(tls, home) -> None:
+    """Join side: read creator's SSH public key, add it, reply with own key."""
+    from .keys import append_authorized_key, ensure_keypair, public_key_text
+    header = _read_header(tls)
+    if header.get("type") != "ssh_key":
+        raise ConnectionError("expected ssh_key exchange")
+    append_authorized_key(str(header.get("key", "")), home=home)
+    _private, _public = ensure_keypair(home)
+    own = public_key_text(home) or ""
+    _send_header(tls, {"type": "ssh_key_ok", "key": own})
+
+
+def exchange_ssh_keys_client(tls, home) -> None:
+    """Creator side: send own SSH public key, read joiner's key, add it."""
+    from .keys import append_authorized_key, ensure_keypair, public_key_text
+    _private, _public = ensure_keypair(home)
+    own = public_key_text(home) or ""
+    _send_header(tls, {"type": "ssh_key", "key": own})
+    header = _read_header(tls)
+    if header.get("type") != "ssh_key_ok":
+        raise ConnectionError("expected ssh_key_ok exchange")
+    append_authorized_key(str(header.get("key", "")), home=home)
+
+
 def _server_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(cert_path), str(key_path))
@@ -259,7 +318,7 @@ class JoinListener:
         self.on_status = on_status
         self._server_sock: socket.socket | None = None
 
-    def wait_for_creator(self, timeout: float | None = None) -> Session:
+    def wait_for_creator(self, timeout: float | None = None, exchange_ssh_keys: bool = False) -> Session:
         key_path, cert_path = ensure_identity(self.home)
         ctx = _server_context(key_path, cert_path)
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -299,6 +358,8 @@ class JoinListener:
             _send_header(tls, {"type": "hello_ok", "device": self.device})
         except Exception as exc:
             raise ConnectionError(f"hello failed: {exc}") from exc
+        if exchange_ssh_keys:
+            exchange_ssh_keys_server(tls, self.home)
         session = Session(tls, self.cwd, device=self.device, peer_device=creator_device)
         session.peer_fingerprint = peer_fp
         return session
@@ -313,7 +374,7 @@ class JoinListener:
 
 def create_session(host: str, port: int, cwd: Path, device: str,
                    known_fingerprint: str = "", home: Path | None = None,
-                   approve_fingerprint=None) -> Session:
+                   approve_fingerprint=None, exchange_ssh_keys: bool = False) -> Session:
     """Creator side: dial the joiner, check its cert fingerprint, return a Session.
 
     approve_fingerprint(fingerprint) -> bool is called when the
@@ -347,11 +408,11 @@ def create_session(host: str, port: int, cwd: Path, device: str,
             raise ConnectionError("creator denied the fingerprint")
     try:
         _send_header(tls, {"type": "hello", "device": device})
-        raw_len = _recv_exact(tls, 4)
-        (length,) = struct.unpack(">I", raw_len)
-        hello_ok = json.loads(_recv_exact(tls, length).decode())
+        hello_ok = _read_header(tls)
         if hello_ok.get("type") != "hello_ok":
             raise ConnectionError("joiner did not accept the session")
+        if exchange_ssh_keys:
+            exchange_ssh_keys_client(tls, home)
     except Exception:
         try:
             tls.close()

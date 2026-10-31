@@ -102,6 +102,29 @@ def remote_sha256(ssh_client, remote_path: str) -> str | None:
     return None
 
 
+def download_file(sftp, remote_name: str, local_dir: Path, on_progress=None) -> Path:
+    """Download one file via SFTP, writing .part then renaming after size check.
+    Returns the final local path. Raises on failure."""
+    local_dir = Path(local_dir)
+    part = local_dir / f"{Path(remote_name).name}.part"
+    final = local_dir / Path(remote_name).name
+    size = int(sftp.stat(remote_name).st_size)
+    with sftp.open(remote_name, "rb") as source, open(part, "wb") as dest:
+        sent = 0
+        while True:
+            chunk = source.read(1024 * 128)
+            if not chunk:
+                break
+            dest.write(chunk)
+            sent += len(chunk)
+            if on_progress is not None:
+                on_progress(Path(remote_name).name, sent, size)
+    if part.stat().st_size == size:
+        part.replace(final)
+        return final
+    raise IOError(f"size mismatch downloading {remote_name}")
+
+
 def upload_files(sftp, local_paths: list[Path], remote_dir: str, progress: TransferProgress,
                  on_file: object = None) -> list[str]:
     """Upload files resumably, writing .part then renaming after verification.

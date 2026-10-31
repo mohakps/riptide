@@ -25,11 +25,11 @@ riptide --help
 riptide --version
 ```
 
-## Usage, v2: Create Server / Join Server
+## Usage, v3: Create Server / Join Server, over SSH
 
-Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in this version and is not in the menu.
+Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in the menu in v3; SSH servers must already be running on both sides (from the v1 set-up, or installed manually).
 
-There is no pairing code in v2, and no Send / Receive menu. File direction is independent of who created or joined.
+There is no pairing code in v3, and no Send / Receive menu. File direction is independent of who created or joined.
 
 ### The one networking rule
 
@@ -37,43 +37,45 @@ The CGNAT side must be the side that dials out. "Create" and "Join" are session 
 
 ### Create Server (CGNAT side, if one side is CGNAT)
 
-1. Enter the joiner's address (the public side's hostname / DDNS name).
-2. Your riptide dials out to the joiner. Outbound from CGNAT works, return traffic is allowed back.
-3. The joiner presses Allow to accept the session.
-4. You are now in a session. Either side can send or download from here.
+1. Enter the joiner as `user@host`. This is the public side's username and hostname / DDNS name.
+2. Step 1, TLS session + SSH key exchange: your riptide dials the joiner's TLS listener, the joiner presses Allow, both sides exchange SSH public keys over TLS and add each other's key to `authorized_keys`. No code to type, no key to paste, no password.
+3. Step 2, SSH: your riptide dials the joiner's SSH server on the standard SSH port with its riptide key. SSH host fingerprint is checked, Allow on first connect, abort if it changed.
+4. You are now in an SSH session. Send selected (SFTP upload) and Download remote file (SFTP download) both work from here.
 
 ### Join Server (public side, if one side is CGNAT)
 
 1. Open Join Server and keep it open. You do not dial the creator, because the creator may be behind CGNAT and unreachable.
-2. When the creator dials in, press Allow to accept the session.
-3. You are now in the same session. Either side can send or download from here.
+2. When the creator dials in over TLS, press Allow. SSH keys are exchanged automatically, and your SSH server must be running.
+3. You are now in the same SSH session. Send selected on your side asks the creator to download that file from you via SFTP. Files the creator uploads arrive via your SSH server, in your home folder.
 
 ### In a session
 
-- Send selected: pick local files (type a name, Tab to complete, Enter to add, or paste dropped paths), they go to the other side's folder where riptide was launched.
-- Download remote file: type a remote file name, it comes to your folder.
-- Files are written with a `.part` suffix and renamed only after SHA-256 matches. A mismatch is reported and kept as `.part`, not renamed.
+- File data goes over SSH/SFTP, not over TLS. TLS is only control + key exchange.
+- Files are written with a `.part` suffix and renamed only after a size check, then SHA-256 is verified when an SSH exec channel is available and reported. A mismatch is reported, not silently accepted.
 - Progress shows per-file progress and sent size.
 
-### One-time network step for the public side
+### One-time network steps for the public side
 
-If the joiner is the public side, their router must forward the riptide session port to their machine once. The internal session port is 49872 (it is never shown in the UI). The CGNAT side needs no port forward. If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
+- SSH port forwarded to their machine once (standard SSH port, from v1).
+- TLS session port forwarded to their machine once, for key exchange (internal session port 49872, never shown in the UI).
+- The CGNAT side needs no port forward.
+- If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
 
-Saved peers live in `~/.riptide/config.toml` (on Windows, the `.riptide` folder under your home directory). That file contains hosts and certificate fingerprints only, never private keys. Identity keys and certificates live under `~/.riptide/` with the key file at 0600.
+Saved peers live in `~/.riptide/config.toml` (on Windows, the `.riptide` folder under your home directory). That file contains hosts and fingerprints only, never private keys. SSH keys live in `~/.ssh/id_riptide`, TLS identity keys live under `~/.riptide/` with the key file at 0600.
 
-## Security notes, v2
+## Security notes, v3
 
-- Sessions are TLS-encrypted, with a self-signed identity per machine.
-- On first connect, the creator checks the joiner's certificate fingerprint and presses Allow; a changed fingerprint aborts the session instead of silently trusting the new host.
-- No pairing code, no pairing listener, no public key pasting.
+- File data is SSH/SFTP, with key-only auth after the TLS key exchange.
+- On first connect, TLS certificate fingerprint and SSH host fingerprint are both checked, Allow on first connect, abort if either changes.
+- No pairing code, no pairing listener, no public key pasting, no password sharing.
 - Partial files stay as `.part` until verified, so a failed transfer does not look like a complete file.
 
-## Limitations in v2
+## Limitations in v3
 
 - Files only, no folders.
 - If both sides are CGNAT on IPv4 and neither has IPv6, this model does not work on its own: a reachable third peer or relay would be needed.
-- Live two-machine CGNAT testing is still needed before calling this finished. Localhost session tests (both directions, download, fingerprint change) pass.
-- Set-up SSH from v1 is present in the code but disabled in the menu in v2. v2 does not use SSH for transfers.
+- Live two-machine CGNAT testing over SSH is still needed before calling this finished. Localhost tests pass for TLS session, SSH key exchange over TLS, both-direction TLS control, SFTP download helper, and fingerprint-change abort. A local SSH server was not available on the test VM, so live SSH/SFTP transfer itself is untested in this build.
+- Set-up SSH from v1 is present in the code but disabled in the menu in v3.
 
 ## Development
 

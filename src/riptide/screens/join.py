@@ -43,7 +43,7 @@ class JoinScreen(Screen):
             Button("Allow", id="allow"),
             Button("Deny", id="deny"),
             Button("Back", id="back"),
-            Static("If you are the public side, your router must forward to this machine once. No code to type.", classes="dim"),
+            Static("Public side: your SSH server must be running, and your router must forward to this machine once. File data goes over SSH. No code to type.", classes="dim"),
         )
 
     def _set_status(self, text: str) -> None:
@@ -87,17 +87,15 @@ class JoinScreen(Screen):
                 self.config.session_port, self.cwd, device=socket.gethostname(),
                 approve=self._approve,
             )
-            session = self._listener.wait_for_creator()
+            session = self._listener.wait_for_creator(exchange_ssh_keys=True)
             if self._pending is not None:
                 device, fp = self._pending
-                # Record the creator as a known peer by host name
-                # (device name is the best host label available here).
-                if fp and self.config.peer_for(device) is None:
+                if self.config.peer_for(device) is None:
                     add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
-            self.app.call_from_thread(self._set_status, "Session live, opening...")
-            from .session_screen import SessionScreen
+            self.app.call_from_thread(self._set_status, "SSH session live, opening...")
+            from .ssh_session import SSHSessionScreen
 
-            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
+            self.app.call_from_thread(self.app.push_screen, SSHSessionScreen(session, "joiner"))
         except Exception as exc:
             self.app.call_from_thread(self._set_status, f"Failed: {exc}")
 

@@ -17,6 +17,8 @@ except ModuleNotFoundError:  # Python < 3.11, not supported by pyproject
 
 # Internal session port. Kept in code/config only; the UI never renders it.
 DEFAULT_SESSION_PORT = 49872
+# Standard SSH port, for file data in v3. Also never rendered in the UI.
+DEFAULT_SSH_PORT = 22
 
 
 def config_dir(home: Path | None = None) -> Path:
@@ -33,6 +35,7 @@ class Peer:
     user: str = ""
     host: str = ""
     fingerprint: str = ""
+    ssh_fingerprint: str = ""
     allow_always: bool = False
 
     def label(self) -> str:
@@ -76,6 +79,7 @@ def load_config(home: Path | None = None) -> Config:
             user=str(item.get("user", "")),
             host=str(item.get("host", "")),
             fingerprint=str(item.get("fingerprint", "")),
+            ssh_fingerprint=str(item.get("ssh_fingerprint", "")),
             allow_always=bool(item.get("allow_always", False)),
         ))
     session_port = data.get("session_port", DEFAULT_SESSION_PORT)
@@ -100,6 +104,7 @@ def save_config(config: Config, home: Path | None = None) -> Path:
         lines.append(f'user = "{_escape(peer.user)}"')
         lines.append(f'host = "{_escape(peer.host)}"')
         lines.append(f'fingerprint = "{_escape(peer.fingerprint)}"')
+        lines.append(f'ssh_fingerprint = "{_escape(peer.ssh_fingerprint)}"')
         lines.append(f'allow_always = {"true" if peer.allow_always else "false"}')
         lines.append("")
     path = config_path(home)
