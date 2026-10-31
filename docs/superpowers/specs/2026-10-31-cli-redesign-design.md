@@ -32,12 +32,17 @@ Riptide is a terminal-based peer-to-peer file transfer tool built with Textual. 
 - Warning color: Yellow/amber (`#FFD166`) for incoming requests.
 
 ### 2.2 Header & Brand
-- Refined ASCII header:
+- Bold ANSI Shadow Block ASCII header on homepage:
   ```text
-    Ψ  R I P T I D E  Ψ
-  ~~~  direct file transfer  ~~~
+  ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
+  ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
+  ██████╔╝██║██████╔╝   ██║   ██║██║  ██║█████╗  
+  ██╔══██╗██║██╔═══╝    ██║   ██║██║  ██║██╔══╝  
+  ██║  ██║██║██║        ██║   ██║██████╔╝███████╗
+  ╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ╚═╝╚═════╝ ╚══════╝
   ```
-  Rendered in soft coral with center alignment, without heavy bounding boxes.
+  Followed by muted tagline: `~~~  direct peer-to-peer file transfer  ~~~`
+  Rendered in soft coral (`#FF6B6B`) with center alignment on transparent background.
 
 ### 2.3 Keymap Footer Bar
 - Context-aware footer bar displayed at the bottom of screens:
