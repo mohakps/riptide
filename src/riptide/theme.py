@@ -14,8 +14,8 @@ WARNING = "#FFD166"
 ERROR = "#FF6B6B"
 
 HEADER_LINES = [
-    "          \u03a8  R I P T I D E  \u03a8",
-    "     ~~~  direct file transfer  ~~~",
+    "\u03a8  R I P T I D E  \u03a8",
+    "~~~  direct file transfer  ~~~",
 ]
 
 CSS = """
