@@ -19,6 +19,7 @@ Features:
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import threading
 import time
@@ -67,6 +68,16 @@ def _truncate_filename(name: str, max_chars: int = 50) -> str:
     suffix_len = (max_chars - 3) - prefix_len
     return f"{name[:prefix_len]}...{name[-suffix_len:]}"
 
+def is_ip_address(text: str) -> bool:
+    if not text:
+        return False
+    cleaned = text.strip("[]").split("%")[0]
+    try:
+        ipaddress.ip_address(cleaned)
+        return True
+    except ValueError:
+        return False
+
 
 class SessionScreen(Screen):
     def __init__(self, session: Session, role: str) -> None:
@@ -98,20 +109,28 @@ class SessionScreen(Screen):
         return getattr(self.session, "peer_host", "") or ""
 
     def _format_client_info(self) -> str:
-        peer_name = self.session.peer_device or "peer"
+        peer_name = getattr(self.session, "peer_device", "") or ""
         peer_addr = self._get_peer_address()
         peer_label = "Client" if self.role in ("creator", "host") else "Host"
-        if peer_addr and peer_addr != peer_name:
-            return f"{peer_label}: [bold #FFFFFF]{peer_name}[/] [dim]({peer_addr})[/]"
-        return f"{peer_label}: [bold #FFFFFF]{peer_name}[/]"
+        peer_host = getattr(self.session, "peer_host", "") or ""
+
+        # Display hostname if connection was made using hostname, else show IP
+        if peer_host and not is_ip_address(peer_host):
+            display_target = peer_host
+        else:
+            display_target = peer_addr or peer_host or "unknown"
+
+        if peer_name and peer_name != display_target:
+            return f"{peer_label}: [bold #FFFFFF]{peer_name}[/] [dim]({display_target})[/]"
+        return f"{peer_label}: [bold #FFFFFF]{display_target}[/]"
 
     def _format_status_indicator(self) -> str:
         if self._connection_state == "connected":
-            return "[#E8E8E8]Connected[/] [bold #78DC8C]●[/]"
+            return "[bold #78DC8C]●[/] [#E8E8E8]Connected[/]"
         elif self._connection_state == "connecting":
-            return "[#E8E8E8]Connecting[/] [bold #FFD166]○[/]"
+            return "[bold #FFD166]○[/] [#E8E8E8]Connecting[/]"
         else:
-            return "[#E8E8E8]Disconnected[/] [bold #FF6B6B]⊗[/]"
+            return "[bold #FF6B6B]⊗[/] [#E8E8E8]Disconnected[/] "
 
     def _update_header(self) -> None:
         try:

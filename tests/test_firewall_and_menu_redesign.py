@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.text import Text
 from textual.app import App
-from textual.widgets import OptionList, Static
+from textual.widgets import Label, OptionList, Static
 
 from riptide.core.config import Config, load_config, save_config
 from riptide.core.firewall import check_firewall_port, get_os, open_firewall_port
@@ -304,3 +304,41 @@ async def test_download_denied_message_shown_below_input(tmp_path: Path):
         await pilot.press("a")
         await pilot.pause()
         assert denied_msg.styles.display == "none"
+
+
+@pytest.mark.asyncio
+async def test_hostname_vs_ip_client_display(tmp_path: Path):
+    """Verify hostname is displayed if connection made via hostname, else IP is displayed."""
+    from riptide.screens.session_screen import SessionScreen
+
+    # 1. Connection made using hostname
+    session_host = _DummySessionForModal(tmp_path)
+    session_host.peer_host = "desktop.local"
+    session_host.peer_device = "yoga"
+    app_host = _SessionModalApp(session_host)
+    async with app_host.run_test(size=(100, 35)) as pilot:
+        label = app_host.screen.query_one("#peer_client_label", Static).render().plain
+        assert "desktop.local" in label
+
+    # 2. Connection made using IP
+    session_ip = _DummySessionForModal(tmp_path)
+    session_ip.peer_host = "192.168.1.100"
+    session_ip.peer_device = "yoga"
+    app_ip = _SessionModalApp(session_ip)
+    async with app_ip.run_test(size=(100, 35)) as pilot:
+        label = app_ip.screen.query_one("#peer_client_label", Static).render().plain
+        assert "192.168.1.100" in label
+
+
+@pytest.mark.asyncio
+async def test_file_list_grey_text_color_is_brightened(tmp_path: Path):
+    """Verify file manager grey text is brightened closer to #EDEDED."""
+    (tmp_path / "sample.txt").write_bytes(b"hello world")
+    session = _DummySessionForModal(tmp_path)
+    app = _SessionModalApp(session)
+    async with app.run_test(size=(100, 35)) as pilot:
+        screen = app.screen
+        lv = screen.query_one("#cwd_list")
+        # Header colors
+        hdr_name = screen.query_one(".file-header-name", Label)
+        assert hdr_name.styles.color.hex.upper() == "#EDEDED"

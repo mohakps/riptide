@@ -125,6 +125,7 @@ def _send_header(sock, header: dict) -> None:
 
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
+                 peer_host: str = "",
                  on_file_received=None, on_ack=None, on_status=None, on_error=None,
                  on_ssh_download_request=None, on_progress=None,
                  on_download_ask=None, on_download_denied=None):
@@ -132,6 +133,7 @@ class Session:
         self.cwd = Path(cwd)
         self.device = device
         self.peer_device = peer_device
+        self.peer_host = peer_host
         self.peer_fingerprint = ""
         self.on_ssh_download_request = on_ssh_download_request
         self.on_file_received = on_file_received
@@ -519,6 +521,7 @@ class JoinListener:
         (length,) = struct.unpack(">I", raw_len)
         hello = json.loads(_recv_exact(tls, length).decode())
         creator_device = str(hello.get("device", "")) or "creator"
+        dialler_host = str(hello.get("host", "")) or _addr[0]
         if self.approve is not None and not self.approve(creator_device, peer_fp):
             try:
                 tls.close()
@@ -531,7 +534,7 @@ class JoinListener:
             raise ConnectionError(f"hello failed: {exc}") from exc
         if exchange_ssh_keys:
             exchange_ssh_keys_server(tls, self.home)
-        session = Session(tls, self.cwd, device=self.device, peer_device=creator_device)
+        session = Session(tls, self.cwd, device=self.device, peer_device=creator_device, peer_host=dialler_host)
         session.peer_fingerprint = peer_fp
         return session
 
@@ -581,7 +584,7 @@ def create_session(host: str, port: int, cwd: Path, device: str,
                 pass
             raise ConnectionError("creator denied the fingerprint")
     try:
-        _send_header(tls, {"type": "hello", "device": device})
+        _send_header(tls, {"type": "hello", "device": device, "host": host})
         hello_ok = _read_header(tls)
         if hello_ok.get("type") != "hello_ok":
             raise ConnectionError("joiner did not accept the session")
@@ -593,6 +596,6 @@ def create_session(host: str, port: int, cwd: Path, device: str,
         except Exception:
             pass
         raise
-    session = Session(tls, cwd, device=device, peer_device=str(hello_ok.get("device", "")))
+    session = Session(tls, cwd, device=device, peer_device=str(hello_ok.get("device", "")), peer_host=host)
     session.peer_fingerprint = server_fp
     return session
