@@ -311,9 +311,9 @@ OptionList:focus {
     border: none;
 }
 OptionList > .option-list--option {
-    padding: 1 1;
+    padding: 0 1;
     background: transparent;
-    color: #E8E8E8;
+    color: #E0E0E0;
 }
 OptionList > .option-list--option-highlighted {
     background: transparent;
@@ -349,7 +349,7 @@ ListItem.--highlight {
    The -highlight rules come last so hover/focus wins over selected. */
 .file-name {
     width: 1fr;
-    color: #EDEDED;
+    color: #E0E0E0;
 }
 ListItem.selected .file-name {
     color: #FF6B6B;
@@ -357,7 +357,7 @@ ListItem.selected .file-name {
 }
 ListItem.selected .file-size,
 ListItem.selected .file-mtime {
-    color: #EDEDED;
+    color: #E0E0E0;
 }
 ListItem.-highlight,
 ListItem.--highlight,
@@ -381,36 +381,36 @@ ListView:focus > ListItem.--highlight Label {
 .file-size {
     width: 12;
     text-align: right;
-    color: #EDEDED;
+    color: #E0E0E0;
 }
 .file-mtime {
     width: 22;
     text-align: right;
-    color: #EDEDED;
+    color: #E0E0E0;
 }
 .file-header-row {
     width: 100%;
     height: 1;
     layout: horizontal;
     padding: 0 1;
-    color: #EDEDED;
+    color: #E0E0E0;
     text-style: bold;
 }
 .file-header-name {
     width: 1fr;
-    color: #EDEDED;
+    color: #E0E0E0;
     text-style: bold;
 }
 .file-header-size {
     width: 12;
     text-align: right;
-    color: #EDEDED;
+    color: #E0E0E0;
     text-style: bold;
 }
 .file-header-mtime {
     width: 22;
     text-align: right;
-    color: #EDEDED;
+    color: #E0E0E0;
     text-style: bold;
 }
 

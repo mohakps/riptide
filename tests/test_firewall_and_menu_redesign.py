@@ -332,7 +332,7 @@ async def test_hostname_vs_ip_client_display(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_file_list_grey_text_color_is_brightened(tmp_path: Path):
-    """Verify file manager grey text is brightened closer to #EDEDED."""
+    """Verify file manager grey text is brightened closer to #E0E0E0."""
     (tmp_path / "sample.txt").write_bytes(b"hello world")
     session = _DummySessionForModal(tmp_path)
     app = _SessionModalApp(session)
@@ -341,4 +341,4 @@ async def test_file_list_grey_text_color_is_brightened(tmp_path: Path):
         lv = screen.query_one("#cwd_list")
         # Header colors
         hdr_name = screen.query_one(".file-header-name", Label)
-        assert hdr_name.styles.color.hex.upper() == "#EDEDED"
+        assert hdr_name.styles.color.hex.upper() == "#E0E0E0"

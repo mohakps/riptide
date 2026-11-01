@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import OptionList, Static
+from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
 from .. import __version__
 from ..core.focus import focus_first, handle_arrow_key
@@ -14,12 +14,14 @@ def _build_option_prompt(title: str, desc: str, active: bool) -> Text:
     t = Text()
     if active:
         t.append("❯  ", style="bold #FF6B6B")
-        t.append(f"{title}\n", style="bold #FFFFFF")
-        t.append(f"   {desc}", style="not bold #71717A")
+        t.append(f"{title:<16}", style="bold #FFFFFF")
+        t.append("  ·  ", style="#71717A")
+        t.append(desc, style="not bold #E0E0E0")
     else:
         t.append("   ", style="#52525B")
-        t.append(f"{title}\n", style="bold #A1A1AA")
-        t.append(f"   {desc}", style="not bold #52525B")
+        t.append(f"{title:<16}", style="bold #A1A1AA")
+        t.append("  ·  ", style="#52525B")
+        t.append(desc, style="not bold #71717A")
     return t
 
 
@@ -37,7 +39,12 @@ class MenuScreen(Screen):
             Static(f"v{__version__}", classes="version-tag"),
             Static(TAGLINES["home"], classes="subheader"),
             OptionList(*options, id="menu_list"),
-            Static("[↑/↓] Navigate   [Enter] Select   [Esc/q] Quit", classes="keymap-bar"),
+        )
+        yield Horizontal(
+            Label(r"[bold #E0E0E0]\[↑/↓][/] [dim #FFFFFF]Navigate[/]", classes="keymap-item keymap-left"),
+            Label(r"[bold #E0E0E0]\[Enter][/] [dim #FFFFFF]Select[/]", classes="keymap-item"),
+            Label(r"[bold #E0E0E0]\[Esc/q][/] [dim #FFFFFF]Quit[/]", classes="keymap-item keymap-right"),
+            id="footer_bar",
         )
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         from .create import CreateScreen
