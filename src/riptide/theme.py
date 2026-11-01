@@ -669,4 +669,97 @@ ProgressBar > .bar--bar {
     text-style: bold;
     border: none;
 }
+
+/* Create Server Redesign Styles */
+#create_body {
+    width: 100%;
+    height: 1fr;
+    layout: vertical;
+    padding: 1 2;
+    margin: 0;
+}
+#create_top_section {
+    width: 100%;
+    height: 3fr;
+    layout: vertical;
+    padding: 0;
+    margin: 0;
+}
+.create-section-title {
+    width: 100%;
+    height: 1;
+    color: #E8E8E8;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
+#saved_devices {
+    width: 100%;
+    height: 1fr;
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 0;
+    margin: 0;
+}
+.device-item {
+    width: 100%;
+    height: 1;
+    color: #71717A;
+    margin: 0 0 1 0;
+}
+#empty_devices {
+    width: 100%;
+    height: auto;
+    color: #71717A;
+}
+#create_input_section {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+    margin: 0;
+    padding: 0;
+}
+#create_input_section Input {
+    width: 60;
+    max-width: 90%;
+    margin: 0;
+}
+#create_bottom_section {
+    width: 100%;
+    height: 1fr;
+    align-horizontal: center;
+    padding: 1 0 0 0;
+}
+#create_bottom_section #status {
+    width: 60;
+    max-width: 90%;
+    text-align: center;
+    color: #71717A;
+    margin: 0 0 1 0;
+}
+#create_bottom_section #fingerprint {
+    width: 60;
+    max-width: 90%;
+    text-align: center;
+    color: #FFD166;
+    margin: 0 0 1 0;
+}
+#create_actions {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin: 1 0 0 0;
+    padding: 0;
+}
+#create_actions Button {
+    width: 22;
+    min-width: 22;
+    height: 3;
+    margin: 0 2;
+    text-style: bold;
+    border: none;
+}
+#create_bottom_section #create {
+    display: none;
+}
 """

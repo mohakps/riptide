@@ -97,15 +97,124 @@ async def test_create_footer_and_keys():
     app = _App(CreateScreen())
     async with app.run_test() as pilot:
         screen = app.screen
-        # Footer text updated. Note: Rich markup strips the [Space]
-        # brackets in render().plain, so check the words, not brackets.
-        from textual.widgets import Static
-        footers = [n.render().plain for n in screen.query(Static)]
-        assert any("Create / Allow" in f and "Deny" in f and "Select" in f for f in footers)
+        footer = screen.query_one("#footer_bar")
+        text = " ".join(node.render().plain for node in footer.query("Label"))
+        assert "[↑/↓]" in text and "[Tab]" in text and "[Enter]" in text and "[Backspace]" in text and "[Esc]" in text
         # Backspace denies when waiting (input not focused).
         screen._awaiting_approval = True
         screen._approved = False
-        # Focus a button, not the input, so backspace is a deny, not a delete.
+        # Focus something not input, so backspace is a deny, not a delete.
         screen.query_one("#create").focus()
         await pilot.press("backspace")
         assert screen._approved is False
+
+
+@pytest.mark.asyncio
+async def test_create_screen_redesign():
+    """Verify create screen redesign:
+    - Omit unnecessary text.
+    - Saved devices is an unordered list, not buttons.
+    - By default, select the first saved device.
+    - Up/down navigates between saved devices.
+    - Grey font color by default, red for focused device.
+    - Position hostname input field at 3/4 vertically and centered horizontally.
+    - Tab cycles between saved devices and hostname input field.
+    - When hostname input is focused, saved devices are not highlighted.
+    - Enter establishes connection with selected device or entered hostname.
+    """
+    from riptide.core.config import Peer
+    from riptide.screens.create import SavedDevicesList
+    from riptide.theme import TAGLINES
+    from textual.widgets import Button, Input, Static
+
+    screen = CreateScreen()
+    # Inject test peers to test full device list functionality
+    screen._peers = [
+        Peer(name="alpha", host="192.168.1.10"),
+        Peer(name="beta", host="192.168.1.20"),
+        Peer(name="gamma", host="192.168.1.30"),
+    ]
+    screen.config.peers = list(screen._peers)
+
+    app = _App(screen)
+    async with app.run_test(size=(100, 40)) as pilot:
+        cs = app.screen
+
+        # 1. Unnecessary text is removed
+        all_text = " ".join(node.render().plain for node in cs.query("Static, Label"))
+        assert TAGLINES["create"] not in all_text
+        assert "Recent peers · select to autofill destination:" not in all_text
+
+        # 2. Saved devices is an unordered list instead of buttons
+        assert not any((b.id or "").startswith("peer_") for b in cs.query(Button))
+        dev_list = cs.query_one("#saved_devices", SavedDevicesList)
+        dev_items = dev_list.query(".device-item")
+        assert len(dev_items) == 3
+        for item in dev_items:
+            assert item.render().plain.startswith("• ")
+
+        # 3. By default, select first saved device
+        assert cs.focused == dev_list
+        assert dev_list.selected_index == 0
+        item0 = cs.query_one("#device_item_0", Static)
+        item1 = cs.query_one("#device_item_1", Static)
+        item2 = cs.query_one("#device_item_2", Static)
+
+        # 4. Red for focused device, grey by default
+        assert any(span.style == "bold #FF6B6B" for span in item0.render().spans)
+        assert any(span.style == "#71717A" for span in item1.render().spans)
+        assert any(span.style == "#71717A" for span in item2.render().spans)
+
+        # 5. Up/down navigates between devices
+        await pilot.press("down")
+        assert dev_list.selected_index == 1
+        assert any(span.style == "#71717A" for span in item0.render().spans)
+        assert any(span.style == "bold #FF6B6B" for span in item1.render().spans)
+
+        await pilot.press("down")
+        assert dev_list.selected_index == 2
+        assert any(span.style == "bold #FF6B6B" for span in item2.render().spans)
+
+        await pilot.press("up")
+        assert dev_list.selected_index == 1
+        assert any(span.style == "bold #FF6B6B" for span in item1.render().spans)
+
+        # 6. Tab to cycle between saved devices and hostname input
+        host_input = cs.query_one("#host", Input)
+        await pilot.press("tab")
+        assert cs.focused == host_input
+
+        # 7. When hostname input is focused, don't highlight saved devices (all grey)
+        assert any(span.style == "#71717A" for span in item0.render().spans)
+        assert any(span.style == "#71717A" for span in item1.render().spans)
+        assert any(span.style == "#71717A" for span in item2.render().spans)
+        assert not any(span.style == "bold #FF6B6B" for span in item1.render().spans)
+
+        # Tab back to saved devices
+        await pilot.press("tab")
+        assert cs.focused == dev_list
+        # Highlight restored to selected device
+        assert any(span.style == "bold #FF6B6B" for span in item1.render().spans)
+
+        # 8. Hostname input positioned at 3/4 vertically and centered horizontally
+        region = host_input.region
+        # Centered horizontally: 100 screen width, input width 60, so x should be around (100-60)/2 = 20
+        assert 15 <= region.x <= 25
+        assert region.width == 60
+        # 3/4 vertically: 40 screen height, 3/4 is 30, region.y + region.height is around 30
+        assert 25 <= region.y <= 30
+
+        # 9. Enter to establish connection with selected device or entered hostname
+        started_hosts: list[str] = []
+        cs._start = lambda host_override=None: started_hosts.append(
+            host_override or (dev_list.selected_device.host if cs.focused == dev_list else host_input.value.strip())
+        )
+        # With dev_list focused:
+        await pilot.press("enter")
+        assert started_hosts[-1] == "192.168.1.20"
+
+        # Focus host input, enter custom hostname, press enter:
+        await pilot.press("tab")
+        host_input.value = "10.0.0.99"
+        await pilot.press("enter")
+        assert started_hosts[-1] == "10.0.0.99"

@@ -21,7 +21,7 @@ async def test_screen_taglines_and_no_back_buttons():
         await pilot.pause()
         cs = app.screen
         labels = " ".join(node.render().plain for node in cs.query("Static, Label"))
-        assert TAGLINES["create"] in labels
+        assert TAGLINES["create"] not in labels
         assert len(cs.query("#back")) == 0
         app.pop_screen()
         await pilot.pause()
