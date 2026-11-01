@@ -78,12 +78,44 @@ DIM = "#71717A"
 SUCCESS = "#78DC8C"
 WARNING = "#FFD166"
 ERROR = "#FF6B6B"
-# Session header, plain terminal font, not block ASCII art.
-# Terminals render all text at one size, so "larger than other
-# text" here means bold + accent + a dedicated header row, not
-# a larger pixel font, which Textual cannot set per widget.
-BANNER_HOST = "HOST"
-BANNER_CLIENT = "CLIENT"
+# Page headers, larger than body text. Terminals render all text
+# at one pixel size, which Textual cannot change per widget, so
+# a "larger" header here means a 5-row block-letter banner, bold
+# and accent coloured, in its own taller header row. This is the
+# same trick as the menu's ANSI Shadow banner, scaled to short
+# page titles so it fits an 80-column terminal.
+_BLOCK_FONT = {
+    'A': [" ███ ", "█   █", "█████", "█   █", "█   █"],
+    'C': [" ████", "█    ", "█    ", "█    ", " ████"],
+    'R': ["████ ", "█   █", "████ ", "█ █  ", "█  █ "],
+    'E': ["█████", "█    ", "████ ", "█    ", "█████"],
+    'T': ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
+    'J': ["  ███", "   █ ", "   █ ", "█  █ ", " ██  "],
+    'O': [" ███ ", "█   █", "█   █", "█   █", " ███ "],
+    'I': ["███", " █ ", " █ ", " █ ", "███"],
+    'N': ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+    'H': ["█   █", "█   █", "█████", "█   █", "█   █"],
+    'S': [" ████", "█    ", " ███ ", "    █", "████ "],
+    'L': ["█    ", "█    ", "█    ", "█    ", "█████"],
+}
+
+
+def block_banner(text: str) -> str:
+    rows = [""] * 5
+    for ch in text:
+        glyph = _BLOCK_FONT.get(ch, ["     "] * 5)
+        for i, row in enumerate(glyph):
+            rows[i] += row + " "
+    return "\n".join(row.rstrip() for row in rows)
+
+
+# Session roles, after the Create/Join name swap: the creator
+# (listener, Create Server) is the host, the joiner (dialler,
+# Join Server) is the client.
+BANNER_HOST = block_banner("HOST")
+BANNER_CLIENT = block_banner("CLIENT")
+BANNER_CREATE = block_banner("CREATE")
+BANNER_JOIN = block_banner("JOIN")
 HEADER_BANNER = """\
 ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
 ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -97,8 +129,9 @@ HEADER_LINES = HEADER_BANNER.splitlines()
 
 TAGLINES = {
     "home": "Direct, encrypted PC-to-PC file transfer · Zero cloud storage, zero intermediate hops",
-    "create": "Dial directly to peer · Outbound connection bypasses CGNAT and strict firewalls",
-    "join": "Listening for peer handshake · Keep this screen open while creator dials in",
+    # After the name swap: Create Server listens, Join Server dials.
+    "create": "Listening for peer handshake · Keep this screen open while joiner dials in",
+    "join": "Dial directly to peer · Outbound connection bypasses CGNAT and strict firewalls",
     "session": "Direct end-to-end encrypted channel · Select local files or drop paths to transfer",
     "setup": "Configure local SSH daemon and automated UPnP port forwarding for inbound connections",
 }
@@ -374,19 +407,32 @@ ListView:focus > ListItem.--highlight Label {
 }
 #session_header_row {
     width: 100%;
-    height: 2;
-    max-height: 2;
+    height: 5;
+    max-height: 5;
     layout: horizontal;
     margin: 0;
     padding: 0;
 }
 #session_host_title {
     width: auto;
-    height: 1;
+    height: 5;
     color: #FF6B6B;
     text-style: bold;
     padding: 0;
     margin: 0;
+}
+/* CGNAT error banner, top centre, hidden until a CGNAT check
+   actually finds one. Shown only on Create Server (the listener). */
+#cgnat_banner {
+    display: none;
+    width: 100%;
+    height: 3;
+    background: #FF6B6B;
+    color: #121212;
+    text-style: bold;
+    text-align: center;
+    padding: 1 2;
+    margin: 0 0 1 0;
 }
 .session-header-text {
     color: #FF6B6B;
@@ -394,7 +440,7 @@ ListView:focus > ListItem.--highlight Label {
 }
 #session_peer_info {
     width: 1fr;
-    height: 2;
+    height: 5;
     layout: vertical;
     padding: 0;
     margin: 0;
@@ -719,9 +765,25 @@ ProgressBar > .bar--bar {
     padding: 0;
 }
 #create_input_section Input {
-    width: 60;
-    max-width: 90%;
+    width: 80;
+    max-width: 95%;
+    height: 5;
+    padding: 1 1;
     margin: 0;
+}
+#create_input_section .composer-label {
+    width: 80;
+    max-width: 95%;
+    color: #FF6B6B;
+    text-style: bold;
+    text-align: left;
+    padding: 0 0 1 0;
+}
+#create_input_section .composer-hint {
+    width: 80;
+    max-width: 95%;
+    color: #71717A;
+    padding: 1 0 0 0;
 }
 #create_bottom_section {
     width: 100%;

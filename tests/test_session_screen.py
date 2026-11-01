@@ -74,7 +74,7 @@ def test_truncate_filename():
 
 @pytest.mark.asyncio
 async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
-    """Header is plain terminal font (HOST, not block art), client
+    """Header is a larger 5-row block banner (HOST), client
     info with IP/host, connection status, and Status subheader removed.
     """
     session = DummySession(tmp_path)
@@ -84,9 +84,8 @@ async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
         assert isinstance(screen, SessionScreen)
 
         host_title = screen.query_one("#session_host_title", Static).render().plain
-        assert "HOST" in host_title
-        assert "█" not in host_title
-        assert "HOST" in BANNER_HOST
+        assert "█" in host_title
+        assert host_title.strip() == BANNER_HOST.strip()
         # Status subheader widget is gone.
         assert len(screen.query("#status")) == 0
         # File-selection box footer inside the box is gone.
@@ -351,9 +350,9 @@ async def test_session_screen_download_section_and_zero_gaps(tmp_path):
         assert any("DOWNLOAD FROM PEER" in l for l in labels)
         assert dl_composer.query_one("#download_input", Input) is not None
 
-        # Header row is now 2 lines high (plain header, not 3-line banner)
+        # Header row is now 5 lines high (block banner header)
         header = screen.query_one("#session_header_row")
-        assert header.styles.height.value == 2
+        assert header.styles.height.value == 5
         assert header.styles.margin.bottom == 0
 
 @pytest.mark.asyncio

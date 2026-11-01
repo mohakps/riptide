@@ -1,6 +1,11 @@
-"""Join Server, redesigned for clarity and user-friendliness.
+"""Create Server, redesigned for clarity and user-friendliness.
 
-Waits for an incoming connection from the creator.
+NOTE: the class is still called JoinScreen for historical reasons.
+After the name swap, this listener page is shown as "Create Server"
+in the UI, and the dial-out page is shown as "Join Server".
+Functionality is unchanged, only the displayed name swapped.
+
+Waits for an incoming connection from the joiner.
 - Omits unnecessary/redundant text.
 - Prominently highlights the incoming connection request in a dedicated card.
 - Enter key to accept the connection, Backspace to deny.
@@ -19,7 +24,9 @@ from textual.screen import Screen
 from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
+from ..core.nat import detect_cgnat_auto
 from ..core.session import JoinListener
+from ..theme import BANNER_CREATE
 
 
 class JoinScreen(Screen):
@@ -32,13 +39,17 @@ class JoinScreen(Screen):
         self._approved = False
         self._awaiting_approval = False
         self._listener: JoinListener | None = None
+        self._stopped = threading.Event()
         self._allow_btn: Button | None = None
         self._deny_btn: Button | None = None
 
     def compose(self) -> ComposeResult:
+        # CGNAT banner, top centre, empty and hidden until a check
+        # actually finds CGNAT. See _check_cgnat().
+        yield Static("", id="cgnat_banner")
         yield VerticalScroll(
             Horizontal(
-                Static("JOIN SERVER", classes="session-header-text", id="session_host_title"),
+                Static(BANNER_CREATE, classes="session-header-text", id="session_host_title"),
                 Vertical(
                     Static(f"Port: {self.config.session_port}", id="peer_client_label"),
                     Static("[#E8E8E8]Listening[/] [bold #FFD166]○[/]", id="peer_status_label"),
@@ -48,8 +59,8 @@ class JoinScreen(Screen):
             ),
             Vertical(
                 Static(
-                    f"[dim]○[/] [bold #E8E8E8]Waiting for creator on port {self.config.session_port}...[/]\n\n"
-                    f"[dim]Share your IP or hostname with the creator to initiate connection.[/]",
+                    f"[dim]○[/] [bold #E8E8E8]Waiting for joiner on port {self.config.session_port}...[/]\n\n"
+                    f"[dim]Share your IP or hostname with the joiner to initiate connection.[/]",
                     id="incoming",
                 ),
                 Horizontal(
@@ -70,6 +81,31 @@ class JoinScreen(Screen):
             id="footer_bar",
         )
 
+    def _show_cgnat_banner(self) -> None:
+        try:
+            banner = self.query_one("#cgnat_banner", Static)
+            banner.update(
+                "CGNAT detected: peers cannot reach this device. "
+                "Swap roles — let the other peer Create Server, and use Join Server here instead."
+            )
+            banner.styles.display = "block"
+        except Exception:
+            pass
+
+    def _check_cgnat(self) -> None:
+        # Runs in a worker thread so the page stays responsive.
+        # Only a positive result shows the banner; an inconclusive
+        # check shows nothing, rather than a false alarm.
+        try:
+            result = detect_cgnat_auto()
+        except Exception:
+            result = None
+        if result:
+            try:
+                self.app.call_from_thread(self._show_cgnat_banner)
+            except Exception:
+                pass
+
     def _set_allow_visible(self, visible: bool) -> None:
         try:
             actions = self.query_one("#join_actions", Horizontal)
@@ -84,6 +120,16 @@ class JoinScreen(Screen):
                     pass
 
     def _set_status(self, text: str) -> None:
+        # Never clobber an active incoming-connection card with a
+        # background status message. A queued worker failure from a
+        # stale listener must not overwrite a decision the user is
+        # looking at.
+        try:
+            card = self.query_one("#incoming_card", Vertical)
+            if "active" in card.classes:
+                return
+        except Exception:
+            pass
         try:
             self.query_one("#incoming", Static).update(text)
         except Exception:
@@ -159,7 +205,22 @@ class JoinScreen(Screen):
         except Exception:
             pass
         self._set_allow_visible(False)
+        # CGNAT check, automatically, as soon as Create Server opens.
+        # This page is the listener, so CGNAT is what breaks it.
+        threading.Thread(target=self._check_cgnat, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
+
+    def on_unmount(self) -> None:
+        # Free the listener port when leaving, otherwise a later
+        # Create Server page in the same process cannot bind it.
+        # Set the flag first, so a worker that has not bound yet
+        # aborts instead of leaking a listener after this screen is gone.
+        self._stopped.set()
+        if self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
 
     def _worker(self) -> None:
         try:
@@ -167,6 +228,8 @@ class JoinScreen(Screen):
                 self.config.session_port, self.cwd, device=socket.gethostname(),
                 approve=self._approve,
             )
+            if self._stopped.is_set():
+                return
             session = self._listener.wait_for_creator()
             if self._pending is not None:
                 device, fp = self._pending
@@ -174,8 +237,13 @@ class JoinScreen(Screen):
                     add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
             self.app.call_from_thread(self._set_status, "[bold #78DC8C]Connection accepted! Opening session...[/]")
             from .session_screen import SessionScreen
-            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
+            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "creator"))
         except Exception as exc:
+            # Do not overwrite an incoming-connection card that is
+            # already on screen; a worker failure cannot happen while
+            # an approval is pending in the real flow.
+            if self._awaiting_approval:
+                return
             try:
                 self.app.call_from_thread(self._set_status, f"[bold #FF6B6B]Failed: {exc}[/]")
             except Exception:
@@ -183,6 +251,7 @@ class JoinScreen(Screen):
 
     async def on_key(self, event) -> None:
         if event.key == "escape":
+            self._stopped.set()
             if self._listener is not None:
                 self._listener.stop()
             self.app.pop_screen()

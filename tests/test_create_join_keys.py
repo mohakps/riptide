@@ -54,7 +54,7 @@ async def test_join_screen_redesign():
 
         # 1. Omit unnecessary text
         all_text = " ".join(node.render().plain for node in screen.query("Static, Label"))
-        assert TAGLINES["join"] not in all_text
+        assert TAGLINES["create"] not in all_text
         assert "Waiting for a creator. Keep this screen open." not in all_text
         assert "Share your address with the creator." not in all_text
 
@@ -142,7 +142,7 @@ async def test_create_screen_redesign():
 
         # 1. Unnecessary text is removed
         all_text = " ".join(node.render().plain for node in cs.query("Static, Label"))
-        assert TAGLINES["create"] not in all_text
+        assert TAGLINES["join"] not in all_text
         assert "Recent peers · select to autofill destination:" not in all_text
 
         # 2. Saved devices is an unordered list instead of buttons
@@ -196,13 +196,15 @@ async def test_create_screen_redesign():
         # Highlight restored to selected device
         assert any(span.style == "bold #FF6B6B" for span in item1.render().spans)
 
-        # 8. Hostname input positioned at 3/4 vertically and centered horizontally
+        # 8. Hostname input positioned at 3/4 vertically and centered horizontally,
+        # now larger: 80 wide, 5 tall, with a label above it.
         region = host_input.region
-        # Centered horizontally: 100 screen width, input width 60, so x should be around (100-60)/2 = 20
-        assert 15 <= region.x <= 25
-        assert region.width == 60
+        # Centered horizontally: 100 screen width, input width 80, so x should be around (100-80)/2 = 10
+        assert 5 <= region.x <= 15
+        assert region.width == 80
+        assert region.height == 5
         # 3/4 vertically: 40 screen height, 3/4 is 30, region.y + region.height is around 30
-        assert 25 <= region.y <= 30
+        assert 20 <= region.y <= 30
 
         # 9. Enter to establish connection with selected device or entered hostname
         started_hosts: list[str] = []

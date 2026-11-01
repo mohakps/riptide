@@ -1,4 +1,10 @@
-"""Create Server screen, redesigned for clarity, usability, and clean keyboard workflow.
+"""Join Server screen (dialler), redesigned for clarity, usability, and clean keyboard workflow.
+
+NOTE: the class is still called CreateScreen for historical reasons.
+After the name swap, this dial-out page is shown as "Join Server"
+in the UI, and the listener page is shown as "Create Server".
+Functionality is unchanged, only the displayed name swapped.
+
 
 - Omit unnecessary text; highlight important headers and active selection.
 - Saved devices rendered as an unordered list instead of buttons.
@@ -26,6 +32,7 @@ from textual.widgets import Button, Input, Label, Static
 from ..core.config import Peer, add_peer, load_config
 from ..core.focus import focus_first
 from ..core.session import create_session, parse_host_input
+from ..theme import BANNER_JOIN
 
 
 class SavedDevicesList(Vertical):
@@ -116,7 +123,7 @@ class CreateScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Static("CREATE SERVER", classes="session-header-text", id="session_host_title"),
+            Static(BANNER_JOIN, classes="session-header-text", id="session_host_title"),
             Vertical(
                 Static(f"Port: {self.config.session_port}", id="peer_client_label"),
                 Static("[#E8E8E8]Ready[/] [bold #78DC8C]○[/]", id="peer_status_label"),
@@ -133,7 +140,9 @@ class CreateScreen(Screen):
                 id="create_top_section",
             ),
             Vertical(
-                Input(placeholder="Joiner address: hostname, IPv4, or IPv6", id="host"),
+                Static("HOSTNAME  ·  creator address", classes="composer-label"),
+                Input(placeholder="Creator address: hostname, IPv4, or IPv6", id="host"),
+                Static("Enter the address of the device waiting on Create Server", classes="composer-hint"),
                 id="create_input_section",
             ),
             Vertical(
@@ -144,7 +153,7 @@ class CreateScreen(Screen):
                     Button("Deny", id="deny", classes="deny"),
                     id="create_actions",
                 ),
-                Button("Create Server", id="create", classes="primary"),
+                Button("Join Server", id="create", classes="primary"),
                 id="create_bottom_section",
             ),
             id="create_body",
@@ -193,7 +202,7 @@ class CreateScreen(Screen):
         try:
             self.app.call_from_thread(
                 self.query_one("#fingerprint", Static).update,
-                f"Fingerprint: {fingerprint[:32]}... Allow to trust this joiner?",
+                f"Fingerprint: {fingerprint[:32]}... Allow to trust this creator?",
             )
             self.app.call_from_thread(self._set_allow_visible, True)
         except Exception:
@@ -260,7 +269,7 @@ class CreateScreen(Screen):
             except Exception:
                 pass
         if not text:
-            self._set_status("Failed: enter the joiner's address first.")
+            self._set_status("Failed: enter the creator's address first.")
             return
         try:
             host = parse_host_input(text)
@@ -290,7 +299,7 @@ class CreateScreen(Screen):
                 add_peer(self.config, Peer(name=host, host=host, fingerprint=session.peer_fingerprint))
             self.app.call_from_thread(self._set_status, "Session live, opening...")
             from .session_screen import SessionScreen
-            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "creator"))
+            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
         except Exception as exc:
             self.app.call_from_thread(self._set_status, f"Failed: {exc}")
 

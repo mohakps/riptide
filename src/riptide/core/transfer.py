@@ -48,14 +48,22 @@ class TransferProgress:
         now = time.monotonic()
         self.sent = int(sent)
         dt = now - self._last_time
-        if dt > 0:
-            instant = (self.sent - self._last_sent) / dt
-            if self.speed_ema == 0:
-                self.speed_ema = instant
-            else:
-                self.speed_ema = 0.7 * self.speed_ema + 0.3 * instant
-            self._last_time = now
-            self._last_sent = self.sent
+        # Guard against burst callbacks: if a caller floods updates
+        # faster than the UI can process them, dt collapses to
+        # microseconds while sent still jumps a full chunk, which
+        # inflates speed by several times. Below 10ms, keep the
+        # sent count for the progress bar, but do not feed the
+        # speed EMA; the next, properly spaced update will then
+        # average over the whole interval instead.
+        if dt < 0.01:
+            return
+        instant = (self.sent - self._last_sent) / dt
+        if self.speed_ema == 0:
+            self.speed_ema = instant
+        else:
+            self.speed_ema = 0.7 * self.speed_ema + 0.3 * instant
+        self._last_time = now
+        self._last_sent = self.sent
 
     @property
     def remaining(self) -> int:

@@ -161,6 +161,7 @@ class Session:
             try:
                 _send_header(self.sock, header)
                 sent = 0
+                last_report = 0.0
                 with open(path, "rb") as handle:
                     while True:
                         chunk = handle.read(1024 * 128)
@@ -168,7 +169,20 @@ class Session:
                             break
                         self.sock.sendall(chunk)
                         sent += len(chunk)
-                        if on_progress is not None:
+                        # Sender progress was the bug: it reported every
+                        # 128KB chunk, while the receiver reports at most
+                        # every 0.1s. The UI computes speed from the time
+                        # between UI callbacks, and call_from_thread lets
+                        # the sender run ahead and queue a burst of
+                        # callbacks that the UI then processes almost
+                        # instantly, so bytes / tiny time = 4-5x speed.
+                        # Throttle the sender exactly like the receiver:
+                        # at most every 0.1s, plus always on the final
+                        # chunk, so the UI time between reports is real
+                        # network time, not queue-processing time.
+                        now = time.monotonic()
+                        if on_progress is not None and (now - last_report >= 0.1 or sent >= size):
+                            last_report = now
                             on_progress(path.name, sent, size)
             except Exception as exc:
                 if self.on_error is not None:

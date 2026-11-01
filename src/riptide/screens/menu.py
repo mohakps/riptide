@@ -13,9 +13,12 @@ from ..theme import HEADER_BANNER, TAGLINES
 
 class MenuScreen(Screen):
     def compose(self) -> ComposeResult:
+        # Names swapped to match network roles, functionality unchanged:
+        # Create Server listens (old JoinScreen), Join Server dials
+        # (old CreateScreen). Create stays on top.
         options = [
-            Option("❯  Create Server      Dial out to peer (Required for CGNAT)", id="create"),
-            Option("   Join Server        Wait for incoming session (Requires Port Forwarding)", id="join"),
+            Option("❯  Create Server      Wait for incoming session (Requires Port Forwarding)", id="create"),
+            Option("   Join Server        Dial out to peer (Required for CGNAT)", id="join"),
         ]
         yield Vertical(
             Static(HEADER_BANNER, classes="header"),
@@ -29,18 +32,21 @@ class MenuScreen(Screen):
         from .create import CreateScreen
         from .join import JoinScreen
 
+        # Class names are historical: JoinScreen is the listener,
+        # CreateScreen is the dialler. The menu names are the swapped
+        # ones the user sees.
         opt_id = event.option_id
         if opt_id == "create":
-            self.app.push_screen(CreateScreen())
-        elif opt_id == "join":
             self.app.push_screen(JoinScreen())
+        elif opt_id == "join":
+            self.app.push_screen(CreateScreen())
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         try:
             opt_list = self.query_one("#menu_list", OptionList)
             prompts = [
-                ("create", "Create Server", "Dial out to peer (Required for CGNAT)"),
-                ("join", "Join Server", "Wait for incoming session (Requires Port Forwarding)"),
+                ("create", "Create Server", "Wait for incoming session (Requires Port Forwarding)"),
+                ("join", "Join Server", "Dial out to peer (Required for CGNAT)"),
             ]
             for idx, (oid, title, desc) in enumerate(prompts):
                 prefix = "❯  " if idx == event.option_index else "   "
