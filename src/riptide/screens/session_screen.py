@@ -44,10 +44,11 @@ from ..core.transfer import TransferProgress, format_bytes as fmt_bytes, format_
 from ..theme import BANNER_CLIENT, BANNER_HOST
 
 
-def _build_file_item(path: Path, selected: bool) -> ListItem:
+def _build_file_item(path: Path, selected: bool, is_focused: bool = False) -> ListItem:
     display, size, mtime = format_browser_row(path)
     item = ListItem(
         Horizontal(
+            Label("❯ " if is_focused else "  ", classes="file-pointer"),
             Label(display, classes="file-name"),
             Label(size, classes="file-size"),
             Label(mtime, classes="file-mtime"),
@@ -176,11 +177,14 @@ class SessionScreen(Screen):
             else:
                 index = 0
         lst.clear()
-        for path in rows:
+        resolved_idx = max(0, min(index, len(rows) - 1)) if (rows and index is not None) else 0
+        for idx, path in enumerate(rows):
             is_parent = path == self.browser_dir.parent and path not in list_browser_entries(self.browser_dir)
+            is_focused = (idx == resolved_idx)
             if is_parent:
                 item = ListItem(
                     Horizontal(
+                        Label("❯ " if is_focused else "  ", classes="file-pointer"),
                         Label("📁 ../", classes="file-name"),
                         Label("", classes="file-size"),
                         Label("", classes="file-mtime"),
@@ -191,7 +195,7 @@ class SessionScreen(Screen):
                 item._riptide_parent = True  # type: ignore[attr-defined]
                 lst.append(item)
             else:
-                lst.append(_build_file_item(path, path in selected))
+                lst.append(_build_file_item(path, path in selected, is_focused=is_focused))
         try:
             if rows and index is not None:
                 lst.index = max(0, min(index, len(rows) - 1))
@@ -249,6 +253,7 @@ class SessionScreen(Screen):
                 ),
                 Static("─" * 200, id="browser_separator"),
                 Horizontal(
+                    Label("  ", classes="file-header-pointer"),
                     Label("NAME", classes="file-header-name"),
                     Label("SIZE", classes="file-header-size"),
                     Label("MODIFIED", classes="file-header-mtime"),
@@ -522,6 +527,18 @@ class SessionScreen(Screen):
             self._send()
         else:
             self._set_status("Select files first with Space, then press Enter to send.")
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        try:
+            lst = self.query_one("#cwd_list", ListView)
+            for child in lst.children:
+                try:
+                    ptr = child.query_one(".file-pointer", Label)
+                    ptr.update("❯ " if child == event.item else "  ")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "approve_download":
             self._answer_download(True)

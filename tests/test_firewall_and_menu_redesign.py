@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.text import Text
 from textual.app import App
-from textual.widgets import Label, OptionList, Static
+from textual.widgets import Label, ListView, OptionList, Static
 
 from riptide.core.config import Config, load_config, save_config
 from riptide.core.firewall import check_firewall_port, get_os, open_firewall_port
@@ -342,3 +342,39 @@ async def test_file_list_grey_text_color_is_brightened(tmp_path: Path):
         # Header colors
         hdr_name = screen.query_one(".file-header-name", Label)
         assert hdr_name.styles.color.hex.upper() == "#E0E0E0"
+
+
+@pytest.mark.asyncio
+async def test_focused_file_pointer_and_download_padding(tmp_path: Path):
+    """Verify focused file shows > pointer in separate column and download composer has top margin."""
+    (tmp_path / "file1.txt").write_bytes(b"aaa")
+    (tmp_path / "file2.txt").write_bytes(b"bbb")
+    session = _DummySessionForModal(tmp_path)
+    app = _SessionModalApp(session)
+    async with app.run_test(size=(100, 35)) as pilot:
+        screen = app.screen
+        lv = screen.query_one("#cwd_list", ListView)
+        lv.focus()
+        await pilot.pause()
+
+        # Header has pointer placeholder
+        hdr_ptr = screen.query_one(".file-header-pointer")
+        assert hdr_ptr is not None
+        # Child 1 (file1.txt, auto-first index 1 after parent '..') has pointer '❯ ', child 2 has '  '
+        ptr1 = lv.children[1].query_one(".file-pointer", Label).render().plain
+        ptr2 = lv.children[2].query_one(".file-pointer", Label).render().plain
+        assert "❯" in ptr1
+        assert "❯" not in ptr2
+
+        # Move down: next item (file2.txt) gets pointer
+        await pilot.press("down")
+        await pilot.pause()
+
+        ptr1_after = lv.children[1].query_one(".file-pointer", Label).render().plain
+        ptr2_after = lv.children[2].query_one(".file-pointer", Label).render().plain
+        assert "❯" not in ptr1_after
+        assert "❯" in ptr2_after
+
+        # Download section has top margin
+        dl_composer = screen.query_one("#download_composer")
+        assert dl_composer.styles.margin.top == 2

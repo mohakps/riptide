@@ -320,6 +320,18 @@ OptionList > .option-list--option-highlighted {
     color: #FF6B6B;
     text-style: bold;
 }
+#menu_list {
+    width: 100%;
+    max-width: 86;
+    height: auto;
+    border: round #3F3F46;
+    background: transparent;
+    padding: 0 1;
+    margin: 1 0;
+}
+#menu_list:focus {
+    border: round #FF6B6B;
+}
 ListView {
     background: transparent;
     border: round #3F3F46;
@@ -387,6 +399,22 @@ ListView:focus > ListItem.--highlight Label {
     width: 22;
     text-align: right;
     color: #E0E0E0;
+}
+.file-header-pointer {
+    width: 2;
+    min-width: 2;
+    max-width: 2;
+    padding: 0;
+    margin: 0;
+}
+.file-pointer {
+    width: 2;
+    min-width: 2;
+    max-width: 2;
+    color: #FF6B6B;
+    text-style: bold;
+    padding: 0;
+    margin: 0;
 }
 .file-header-row {
     width: 100%;
@@ -615,7 +643,7 @@ ListView:focus > ListItem.--highlight Label {
     width: 100%;
     height: auto;
     padding: 0;
-    margin: 1 0 0 0;
+    margin: 2 0 0 0;
     background: transparent;
 }
 #download_composer .composer-label {
