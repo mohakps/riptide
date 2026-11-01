@@ -244,18 +244,15 @@ class SessionScreen(Screen):
                 id="selected_files_section",
             ),
             Vertical(
-                Static("DOWNLOAD FROM PEER  ·  peer path", classes="composer-label"),
+                Static("DOWNLOAD FROM PEER", classes="composer-label"),
                 Input(
-                    placeholder="Type a peer path, absolute or relative, e.g. /home/friend/report.pdf…",
+                    placeholder="Peer file path to download, e.g. /home/friend/report.pdf…",
                     id="download_input",
                 ),
-                Static("Enter asks peer for approval  •  Disabled when files are selected to send", classes="composer-hint"),
+                Static("", id="download_denied_message", classes="download-denied-message"),
                 classes="composer",
                 id="download_composer",
             ),
-            Static("", id="download_approval"),
-            Button("Allow download", id="approve_download", classes="allow"),
-            Button("Deny download", id="deny_download", classes="deny"),
             Vertical(
                 ProgressBar(total=100, id="bar"),
                 Horizontal(
@@ -285,6 +282,20 @@ class SessionScreen(Screen):
             Label(r"[bold #E8E8E8]\[Esc][/] [dim #FFFFFF]Leave[/]", classes="keymap-item keymap-right"),
             id="footer_bar",
         )
+        yield Vertical(
+            Vertical(
+                Static("📥  DOWNLOAD REQUEST", id="download_modal_title"),
+                Static("", id="download_approval"),
+                Horizontal(
+                    Button("Accept", id="approve_download", classes="allow"),
+                    Button("Deny", id="deny_download", classes="deny"),
+                    id="download_modal_actions",
+                ),
+                Static(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Accept[/]    [bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Deny[/]", id="download_modal_footer"),
+                id="download_modal_card",
+            ),
+            id="download_modal_overlay",
+        )
 
     def on_mount(self) -> None:
         self.session.on_file_received = lambda name, ok, reason: self.app.call_from_thread(self._on_received, name, ok, reason)
@@ -296,7 +307,7 @@ class SessionScreen(Screen):
             self._on_progress, name, received, total, received, total, "Receiving"
         )
         self.session.on_download_ask = lambda name, rid: self.app.call_from_thread(self._on_download_ask, name, rid)
-        self.session.on_download_denied = lambda name, rid: self.app.call_from_thread(self._set_status, f"Peer denied download of {name}")
+        self.session.on_download_denied = lambda name, rid: self.app.call_from_thread(self._on_download_denied, name, rid)
         self.session.start()
         self._find_cursor_visible = True
         try:
@@ -321,6 +332,18 @@ class SessionScreen(Screen):
         self._update_header()
 
     def _set_download_approval_visible(self, visible: bool) -> None:
+        try:
+            overlay = self.query_one("#download_modal_overlay", Vertical)
+            if visible:
+                overlay.add_class("active")
+                overlay.styles.display = "block"
+                if self._approve_btn:
+                    self._approve_btn.focus()
+            else:
+                overlay.remove_class("active")
+                overlay.styles.display = "none"
+        except Exception:
+            pass
         for btn in (self._approve_btn, self._deny_btn):
             if btn is not None:
                 try:
@@ -344,7 +367,8 @@ class SessionScreen(Screen):
         name, _rid = self._pending_downloads[0]
         try:
             self.query_one("#download_approval", Static).update(
-                f"Peer wants to download: {name}  —  Allow to send it, Deny to refuse."
+                f"Peer wants to download:\n[bold #FFFFFF]{name}[/]\n\n"
+                f"[dim #A1A1AA]Allow to send it, Deny to refuse.[/]"
             )
         except Exception:
             pass
@@ -470,6 +494,10 @@ class SessionScreen(Screen):
             if name:
                 self._download(name)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "download_input":
+            self._clear_download_denied()
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if self.selection:
             self._send()
@@ -528,6 +556,7 @@ class SessionScreen(Screen):
 
         threading.Thread(target=worker, daemon=True).start()
     def _download(self, name: str) -> None:
+        self._clear_download_denied()
         if self.selection:
             self._set_status("Cannot download while files are selected to send. Send or unselect them first.")
             return
@@ -535,8 +564,53 @@ class SessionScreen(Screen):
         ok = self.session.request_download(name, request_id=str(uuid.uuid4()))
         if not ok:
             self._set_status(f"Failed to request {name}")
+    def _on_download_denied(self, name: str, request_id: str) -> None:
+        self._set_status(f"Peer denied download of {name}")
+        try:
+            msg = self.query_one("#download_denied_message", Static)
+            msg.update(f"✗ Peer denied download request for {name}")
+            msg.add_class("active")
+            msg.styles.display = "block"
+        except Exception:
+            pass
+
+    def _clear_download_denied(self) -> None:
+        try:
+            msg = self.query_one("#download_denied_message", Static)
+            msg.update("")
+            msg.remove_class("active")
+            msg.styles.display = "none"
+        except Exception:
+            pass
+
+
+    def _is_download_modal_active(self) -> bool:
+        return bool(self._pending_downloads)
 
     async def on_key(self, event) -> None:
+        if self._is_download_modal_active():
+            if event.key == "enter":
+                event.stop()
+                self._answer_download(True)
+                return
+            if event.key in ("backspace", "delete"):
+                event.stop()
+                self._answer_download(False)
+                return
+            if event.key in ("left", "right", "tab"):
+                event.stop()
+                if self.focused == self._deny_btn and self._approve_btn:
+                    self._approve_btn.focus()
+                elif self._deny_btn:
+                    self._deny_btn.focus()
+                return
+            if event.key == "escape":
+                event.stop()
+                self._answer_download(False)
+                return
+            event.stop()
+            return
+
         if event.key == "escape":
             if self._search_query:
                 event.stop()

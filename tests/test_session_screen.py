@@ -84,7 +84,6 @@ async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
         assert isinstance(screen, SessionScreen)
 
         host_title = screen.query_one("#session_host_title", Static).render().plain
-        assert "█" in host_title
         assert host_title.strip() == BANNER_HOST.strip()
         # Status subheader widget is gone.
         assert len(screen.query("#status")) == 0

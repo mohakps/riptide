@@ -54,7 +54,7 @@ class Peer:
 class Config:
     peers: list[Peer] = field(default_factory=list)
     session_port: int = DEFAULT_SESSION_PORT
-
+    firewall_port_open: bool | None = None
     def peer_for(self, host: str, user: str = "") -> Peer | None:
         for peer in self.peers:
             if peer.host == host:
@@ -101,7 +101,9 @@ def load_config(home: Path | None = None) -> Config:
         # Migrate it, so both peers move to 50000 together. It is
         # persisted at the next save_config (e.g. when a peer is added).
         session_port = DEFAULT_SESSION_PORT
-    return Config(peers=peers, session_port=session_port)
+    firewall_val = data.get("firewall_port_open")
+    firewall_port_open = bool(firewall_val) if firewall_val is not None else None
+    return Config(peers=peers, session_port=session_port, firewall_port_open=firewall_port_open)
 
 
 def save_config(config: Config, home: Path | None = None) -> Path:
@@ -111,7 +113,10 @@ def save_config(config: Config, home: Path | None = None) -> Path:
                 raise ValueError("refusing to store a private key in config")
     directory = config_dir(home)
     directory.mkdir(parents=True, exist_ok=True)
-    lines = [f"session_port = {int(config.session_port)}", ""]
+    lines = [f"session_port = {int(config.session_port)}"]
+    if config.firewall_port_open is not None:
+        lines.append(f"firewall_port_open = {'true' if config.firewall_port_open else 'false'}")
+    lines.append("")
     for peer in config.peers:
         lines.append("[[peer]]")
         lines.append(f'name = "{_escape(peer.name)}"')

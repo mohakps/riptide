@@ -30,8 +30,9 @@ from ..theme import BANNER_CREATE
 
 
 class JoinScreen(Screen):
-    def __init__(self) -> None:
+    def __init__(self, port_was_closed: bool = False) -> None:
         super().__init__()
+        self.port_was_closed = port_was_closed
         self.cwd = Path.cwd()
         self.config = load_config()
         self._pending: tuple[str, str] | None = None
@@ -47,6 +48,7 @@ class JoinScreen(Screen):
         # CGNAT banner, top centre, empty and hidden until a check
         # actually finds CGNAT. See _check_cgnat().
         yield Static("", id="cgnat_banner")
+        yield Static("", id="router_banner")
         yield VerticalScroll(
             Horizontal(
                 Static(BANNER_CREATE, classes="session-header-text", id="session_host_title"),
@@ -92,6 +94,17 @@ class JoinScreen(Screen):
             banner.styles.display = "block"
         except Exception:
             pass
+    def _show_router_banner(self) -> None:
+        try:
+            banner = self.query_one("#router_banner", Static)
+            banner.update(
+                f"Port {self.config.session_port} was closed in your firewall. "
+                f"An OS rule was added — please also forward port {self.config.session_port} (TCP) in your router settings."
+            )
+            banner.styles.display = "block"
+        except Exception:
+            pass
+
 
     def _update_public_ip(self, ip: str | None) -> None:
         try:
@@ -235,6 +248,8 @@ class JoinScreen(Screen):
         # Public IP, same timing, so the joiner has something to dial.
         threading.Thread(target=self._fetch_public_ip, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
+        if self.port_was_closed:
+            self._show_router_banner()
 
     def on_unmount(self) -> None:
         # Free the listener port when leaving, otherwise a later

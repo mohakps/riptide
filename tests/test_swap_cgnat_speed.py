@@ -51,7 +51,7 @@ async def test_listener_page_title_and_cgnat_banner():
     async with app.run_test(size=(100, 40)) as pilot:
         screen = app.screen
         title = screen.query_one("#session_host_title", Static).render().plain
-        assert "█" in title
+        assert title.strip() == BANNER_CREATE.strip()
         # Banner starts empty/hidden, then shows on a positive check.
         banner = screen.query_one("#cgnat_banner", Static)
         assert banner.render().plain.strip() == ""
@@ -66,7 +66,7 @@ async def test_dialler_page_title_and_hostname_input():
     async with app.run_test(size=(100, 40)) as pilot:
         screen = app.screen
         title = screen.query_one("#session_host_title", Static).render().plain
-        assert "█" in title
+        assert title.strip() == BANNER_JOIN.strip()
         host = screen.query_one("#host", Input)
         # Larger than the old 60-wide input, centred, with a label above.
         assert host.styles.width.value == 80

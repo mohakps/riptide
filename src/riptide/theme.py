@@ -112,10 +112,25 @@ def block_banner(text: str) -> str:
 # Session roles, after the Create/Join name swap: the creator
 # (listener, Create Server) is the host, the joiner (dialler,
 # Join Server) is the client.
-BANNER_HOST = block_banner("HOST")
-BANNER_CLIENT = block_banner("CLIENT")
-BANNER_CREATE = block_banner("CREATE")
-BANNER_JOIN = block_banner("JOIN")
+BANNER_HOST = r"""   __ ______  __________
+  / // / __ \/ __/_  __/
+ / _  / /_/ /\ \  / /   
+/_//_/\____/___/ /_/"""
+
+BANNER_CLIENT = r"""  _______   _________  ________
+ / ___/ /  /  _/ __/ |/ /_  __/
+/ /__/ /___/ // _//    / / /   
+\___/____/___/___/_/|_/ /_/"""
+
+BANNER_CREATE = r"""  ________  _______ __________
+ / ___/ _ \/ __/ _ /_  __/ __/
+/ /__/ , _/ _// __ |/ / / _/  
+\___/_/|_/___/_/ |_/_/ /___/"""
+
+BANNER_JOIN = r"""     ______  _____  __
+ __ / / __ \/  _/ |/ /
+/ // / /_/ // //    / 
+\___/\____/___/_/|_/"""
 HEADER_BANNER = """\
 ██████╗ ██╗██████╗ ████████╗██╗██████╗ ███████╗
 ██╔══██╗██║██╔══██╗╚══██╔══╝██║██╔══██╗██╔════╝
@@ -142,6 +157,7 @@ App, Screen {
     color: #E8E8E8;
     layout: vertical;
     padding: 1 2;
+    layers: base overlay;
 }
 Static, Label {
     background: transparent;
@@ -295,7 +311,7 @@ OptionList:focus {
     border: none;
 }
 OptionList > .option-list--option {
-    padding: 0 1;
+    padding: 1 1;
     background: transparent;
     color: #E8E8E8;
 }
@@ -434,6 +450,18 @@ ListView:focus > ListItem.--highlight Label {
     padding: 1 2;
     margin: 0 0 1 0;
 }
+/* Router port-forwarding notice, shown only when port was closed in OS firewall */
+#router_banner {
+    display: none;
+    width: 100%;
+    height: auto;
+    background: #FFD166;
+    color: #121212;
+    text-style: bold;
+    text-align: center;
+    padding: 1 2;
+    margin: 0 0 1 0;
+}
 .session-header-text {
     color: #FF6B6B;
     text-style: bold;
@@ -475,7 +503,7 @@ ListView:focus > ListItem.--highlight Label {
     border: round #3F3F46;
     background: transparent;
     padding: 0 1;
-    margin: 0;
+    margin: 1 0;
 }
 #browser_box:focus-within {
     border: round #FF6B6B;
@@ -583,6 +611,44 @@ ListView:focus > ListItem.--highlight Label {
     color: #71717A;
 }
 
+#download_composer {
+    width: 100%;
+    height: auto;
+    padding: 0;
+    margin: 1 0 0 0;
+    background: transparent;
+}
+#download_composer .composer-label {
+    width: 100%;
+    height: 1;
+    color: #71717A;
+    text-style: bold;
+    padding: 0;
+    margin: 0;
+}
+#download_composer Input {
+    width: 100%;
+    height: 3;
+    border: round #3F3F46;
+    background: transparent;
+    padding: 0 1;
+    margin: 0;
+}
+#download_composer Input:focus {
+    border: round #FF6B6B;
+}
+#download_denied_message {
+    display: none;
+    width: 100%;
+    height: auto;
+    color: #FF6B6B;
+    text-style: bold;
+    padding: 0;
+    margin: 0;
+}
+#download_denied_message.active {
+    display: block;
+}
 #download_composer.disabled {
     opacity: 0.35;
 }
@@ -590,15 +656,14 @@ ListView:focus > ListItem.--highlight Label {
     border: round #27272A;
     color: #52525B;
 }
-#download_composer.disabled .composer-label,
-#download_composer.disabled .composer-hint {
+#download_composer.disabled .composer-label {
     color: #52525B;
 }
 
 #progress_section {
     width: 100%;
     height: auto;
-    margin: 0;
+    margin: 1 0 0 0;
     padding: 0;
     display: none;
 }
@@ -657,6 +722,79 @@ ProgressBar > .bar--bar {
     height: 1;
     text-align: right;
     color: #71717A;
+}
+#session_scroll {
+    layer: base;
+}
+
+/* Download Request Modal Popup (dims background, centered) */
+#download_modal_overlay {
+    layer: overlay;
+    display: none;
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+}
+#download_modal_overlay.active {
+    display: block;
+}
+#download_modal_card {
+    width: 60;
+    height: auto;
+    border: round #FF6B6B;
+    background: #18181B;
+    padding: 1 2;
+    align: center middle;
+}
+#download_modal_title {
+    width: 100%;
+    text-align: center;
+    color: #FFD166;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
+#download_modal_card #download_approval {
+    width: 100%;
+    text-align: center;
+    color: #E8E8E8;
+    margin: 0 0 1 0;
+}
+#download_modal_actions {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    margin: 1 0;
+}
+#download_modal_actions Button {
+    margin: 0 2;
+    min-width: 16;
+}
+#download_modal_actions Button.allow {
+    background: #78DC8C;
+    color: #121212;
+    text-style: bold;
+}
+#download_modal_actions Button.allow:focus {
+    background: #8EEC9F;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#download_modal_actions Button.deny {
+    background: #FF6B6B;
+    color: #121212;
+    text-style: bold;
+}
+#download_modal_actions Button.deny:focus {
+    background: #FF8787;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#download_modal_footer {
+    width: 100%;
+    text-align: center;
+    color: #71717A;
+    margin: 1 0 0 0;
 }
 
 #footer_bar {
