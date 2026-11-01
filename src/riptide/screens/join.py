@@ -24,7 +24,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
-from ..core.nat import detect_cgnat_auto
+from ..core.nat import detect_cgnat_auto, public_ip
 from ..core.session import JoinListener
 from ..theme import BANNER_CREATE
 
@@ -58,6 +58,7 @@ class JoinScreen(Screen):
                 id="session_header_row",
             ),
             Vertical(
+                Static("Your public address: checking…", id="public_ip"),
                 Static(
                     f"[dim]○[/] [bold #E8E8E8]Waiting for joiner on port {self.config.session_port}...[/]\n\n"
                     f"[dim]Share your IP or hostname with the joiner to initiate connection.[/]",
@@ -89,6 +90,29 @@ class JoinScreen(Screen):
                 "Swap roles — let the other peer Create Server, and use Join Server here instead."
             )
             banner.styles.display = "block"
+        except Exception:
+            pass
+
+    def _update_public_ip(self, ip: str | None) -> None:
+        try:
+            if ip:
+                self.query_one("#public_ip", Static).update(
+                    f"Your public address: [bold #FF6B6B]{ip}[/]"
+                )
+            else:
+                self.query_one("#public_ip", Static).update(
+                    "[dim]Your public address: could not be determined (check internet)[/]"
+                )
+        except Exception:
+            pass
+
+    def _fetch_public_ip(self) -> None:
+        try:
+            ip = public_ip()
+        except Exception:
+            ip = None
+        try:
+            self.app.call_from_thread(self._update_public_ip, ip)
         except Exception:
             pass
 
@@ -208,6 +232,8 @@ class JoinScreen(Screen):
         # CGNAT check, automatically, as soon as Create Server opens.
         # This page is the listener, so CGNAT is what breaks it.
         threading.Thread(target=self._check_cgnat, daemon=True).start()
+        # Public IP, same timing, so the joiner has something to dial.
+        threading.Thread(target=self._fetch_public_ip, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
 
     def on_unmount(self) -> None:

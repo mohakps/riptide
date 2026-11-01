@@ -15,8 +15,16 @@ try:
 except ModuleNotFoundError:  # Python < 3.11, not supported by pyproject
     import tomli as tomllib  # type: ignore
 
-# Internal session port. Kept in code/config only; the UI never renders it.
-DEFAULT_SESSION_PORT = 49872
+# Internal session port. Kept in code/config only, except for the
+# Create/Join header and waiting text in the user's own redesign.
+# 50000 is in the dynamic/private range (49152-65535), so it is not
+# IANA-reserved, but it is the de facto default for IBM DB2, Jenkins
+# agents, and SAP NetWeaver Java, so a machine running one of those
+# will already have it in use and Riptide will fail to bind.
+DEFAULT_SESSION_PORT = 50000
+# Old default, migrated on load so an existing saved config does
+# not keep the two peers on different ports after the change.
+LEGACY_SESSION_PORT = 49872
 # Standard SSH port, for file data in v3. Also never rendered in the UI.
 DEFAULT_SSH_PORT = 22
 
@@ -86,6 +94,12 @@ def load_config(home: Path | None = None) -> Config:
     try:
         session_port = int(session_port)
     except Exception:
+        session_port = DEFAULT_SESSION_PORT
+    if session_port == LEGACY_SESSION_PORT:
+        # A saved file from before the port change almost certainly
+        # just holds the old default, not a deliberate custom port.
+        # Migrate it, so both peers move to 50000 together. It is
+        # persisted at the next save_config (e.g. when a peer is added).
         session_port = DEFAULT_SESSION_PORT
     return Config(peers=peers, session_port=session_port)
 

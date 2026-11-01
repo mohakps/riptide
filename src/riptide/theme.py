@@ -681,6 +681,14 @@ ProgressBar > .bar--bar {
 }
 
 /* Join Screen Redesign Styles */
+#public_ip {
+    width: 100%;
+    height: 1;
+    color: #E8E8E8;
+    text-style: bold;
+    margin: 0 0 1 0;
+    padding: 0;
+}
 #incoming_card {
     width: 100%;
     height: auto;

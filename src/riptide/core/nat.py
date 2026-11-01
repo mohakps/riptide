@@ -180,6 +180,29 @@ def detect_cgnat_auto() -> bool | None:
     return None
 
 
+def public_ip() -> str | None:
+    """Current public address, STUN first, HTTPS fallback.
+
+    Returns None if neither works. This is the address the Create
+    Server page shows, so the joiner knows what to dial. Behind
+    CGNAT it is the shared CGNAT address, not a directly reachable
+    one, which is why the CGNAT banner exists alongside it.
+    """
+    ip = stun_public_ip()
+    if ip:
+        return ip
+    import urllib.request
+    for url in ("https://api.ipify.org", "https://checkip.amazonaws.com"):
+        try:
+            with urllib.request.urlopen(url, timeout=2.0) as resp:
+                candidate = resp.read().decode(errors="ignore").strip()
+            ipaddress.ip_address(candidate)
+            return candidate
+        except Exception:
+            continue
+    return None
+
+
 def local_ip() -> str:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:

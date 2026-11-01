@@ -59,7 +59,7 @@ The CGNAT side must be the side that dials out. "Create" and "Join" are session 
 
 ### One-time network step for the public side
 
-If the joiner is the public side, their router must forward the riptide session port to their machine once. The internal session port is 49872 (it is never shown in the UI). The CGNAT side needs no port forward. If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
+If the creator is the public side, their router must forward the riptide session port to their machine once. The internal session port is 50000. The CGNAT side needs no port forward. If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
 
 Saved peers live in `~/.riptide/config.toml` (on Windows, the `.riptide` folder under your home directory). That file contains hosts and fingerprints only, never private keys. TLS identity keys live under `~/.riptide/` with the key file at 0600.
 
