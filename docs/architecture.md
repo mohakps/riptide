@@ -61,11 +61,11 @@ Port forwarding on your own router does nothing behind CGNAT, because the ISP bo
 
 A firewall is separate from NAT. Even with a correct port forward, the Create side PC firewall can drop the inbound connection.
 
-- Windows: allow inbound TCP on port 50000 in Windows Defender Firewall, Advanced Settings, Inbound Rules.
-- Linux: with `ufw`, run `sudo ufw allow 50000/tcp`. With `firewalld` or `iptables`, add the equivalent rule. If no firewall is active, there is nothing to allow.
+- Windows: on clicking Create Server, Riptide checks netsh inbound rules for TCP port 50000 and adds a rule named Riptide File Transfer if it is closed. This needs administrator rights.
+- Linux: on clicking Create Server, Riptide checks the active firewall, `ufw`, `firewalld`, `iptables`, or `nftables`, and adds a rule for TCP port 50000 if it is closed. It uses passwordless sudo, so it does not hang on a password prompt it cannot show. If no firewall is active, there is nothing to allow.
 - Router firewall: some routers have a firewall in addition to NAT. A port forward rule normally implies an allow, but check a separate firewall toggle if your router has one.
 
-Riptide does not silently add a firewall rule. Setup helpers check for existing rules and try UPnP discovery, but opening the firewall and the router forward are deliberate, one-time, manual steps on the Create side. The Join side normally needs no inbound rule, because it makes an outbound connection.
+The router forward remains a manual, one-time step on the Create side. The PC firewall rule is automatic when Riptide has the rights above, and the Create page reports whether the rule was opened or could not be opened, with the manual command in the second case. The Join side normally needs no inbound rule, because it makes an outbound connection.
 
 ### DDNS
 

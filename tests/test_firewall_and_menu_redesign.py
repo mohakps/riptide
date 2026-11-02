@@ -10,7 +10,13 @@ from textual.app import App
 from textual.widgets import Label, ListView, OptionList, Static
 
 from riptide.core.config import Config, load_config, save_config
-from riptide.core.firewall import check_firewall_port, get_os, open_firewall_port
+from riptide.core.firewall import (
+    check_firewall_port,
+    ensure_firewall_port,
+    get_os,
+    manual_firewall_command,
+    open_firewall_port,
+)
 from riptide.screens.join import JoinScreen
 from riptide.screens.menu import MenuScreen
 from riptide.theme import BANNER_CLIENT, BANNER_CREATE, BANNER_HOST, BANNER_JOIN, CSS
@@ -26,12 +32,15 @@ class _MenuTestApp(App):
 class _JoinTestApp(App):
     CSS = CSS
 
-    def __init__(self, port_was_closed: bool = False):
+    def __init__(self, port_was_closed: bool = False, firewall_opened: bool = False):
         super().__init__()
         self.port_was_closed = port_was_closed
+        self.firewall_opened = firewall_opened
 
     def on_mount(self):
-        self.push_screen(JoinScreen(port_was_closed=self.port_was_closed))
+        self.push_screen(
+            JoinScreen(port_was_closed=self.port_was_closed, firewall_opened=self.firewall_opened)
+        )
 
 
 def test_small_slant_banners_structure():
@@ -133,39 +142,116 @@ def test_firewall_open_port_invokes_os_command():
 
 @pytest.mark.asyncio
 async def test_menu_clicking_create_server_firewall_flow(tmp_path: Path):
-    """When clicking create server, check port in firewall, save to config, open if closed."""
+    """When clicking create server, check port, open if closed, save the result."""
     app = _MenuTestApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
-        with patch("riptide.core.firewall.check_firewall_port", return_value=False) as mock_check:
-            with patch("riptide.core.firewall.open_firewall_port", return_value=True) as mock_open:
-                async with app.run_test() as pilot:
-                    opt_list = app.screen.query_one("#menu_list", OptionList)
-                    opt_list.highlighted = 0
-                    await pilot.press("enter")
-                    await pilot.pause()
+        with patch(
+            "riptide.core.firewall.ensure_firewall_port", return_value=(False, True, True)
+        ) as mock_ensure:
+            async with app.run_test() as pilot:
+                opt_list = app.screen.query_one("#menu_list", OptionList)
+                opt_list.highlighted = 0
+                await pilot.press("enter")
+                await pilot.pause()
 
-                    assert mock_check.called
-                    assert mock_open.called
+                assert mock_ensure.called
+                # Port was closed, then opened, so the saved state is open.
+                cfg = load_config(home=tmp_path)
+                assert cfg.firewall_port_open is True
 
-                    # Verify config was saved with firewall_port_open = False (since it was closed)
-                    cfg = load_config(home=tmp_path)
-                    assert cfg.firewall_port_open is False
+
+@pytest.mark.asyncio
+async def test_menu_clicking_create_server_firewall_failed(tmp_path: Path):
+    """When opening fails, the saved state stays closed."""
+    app = _MenuTestApp()
+    with patch("riptide.core.config.config_dir", return_value=tmp_path):
+        with patch(
+            "riptide.core.firewall.ensure_firewall_port", return_value=(False, False, False)
+        ):
+            async with app.run_test() as pilot:
+                opt_list = app.screen.query_one("#menu_list", OptionList)
+                opt_list.highlighted = 0
+                await pilot.press("enter")
+                await pilot.pause()
+
+                cfg = load_config(home=tmp_path)
+                assert cfg.firewall_port_open is False
+
+
+def test_ensure_firewall_port():
+    """ensure returns was_open, opened, is_open_now, and trusts a successful open."""
+    with patch("riptide.core.firewall.check_firewall_port", return_value=True):
+        assert ensure_firewall_port(50000) == (True, False, True)
+    with patch("riptide.core.firewall.check_firewall_port", return_value=False):
+        with patch("riptide.core.firewall.open_firewall_port", return_value=True):
+            assert ensure_firewall_port(50000) == (False, True, True)
+    with patch("riptide.core.firewall.check_firewall_port", return_value=False):
+        with patch("riptide.core.firewall.open_firewall_port", return_value=False):
+            assert ensure_firewall_port(50000) == (False, False, False)
+
+
+def test_manual_firewall_command_contains_port():
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        assert "50000" in manual_firewall_command(50000)
+        assert "netsh" in manual_firewall_command(50000)
+    with patch("riptide.core.firewall.get_os", return_value="linux"):
+        with patch("shutil.which", side_effect=lambda cmd: "/usr/bin/ufw" if cmd == "ufw" else None):
+            assert manual_firewall_command(50000) == "sudo ufw allow 50000/tcp"
+
+
+def test_firewall_check_windows_port_range():
+    """A netsh rule covering a range that includes the port counts as open."""
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        fake = """
+Rule Name:                            Riptide
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             TCP
+LocalPort:                            49990-50010
+"""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake)
+            assert check_firewall_port(50000) is True
+            assert check_firewall_port(60000) is False
+
+
+def test_firewall_open_linux_uses_sudo_n():
+    """Linux open must not prompt for a password, so it uses sudo -n."""
+    with patch("riptide.core.firewall.get_os", return_value="linux"):
+        with patch("shutil.which", side_effect=lambda cmd: "/usr/bin/ufw" if cmd == "ufw" else None):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                assert open_firewall_port(50000) is True
+                first_cmd = mock_run.call_args_list[0][0][0]
+                assert first_cmd[0] == "sudo" and first_cmd[1] == "-n"
 
 
 @pytest.mark.asyncio
 async def test_join_screen_router_banner_shown_only_when_closed():
     """Router banner is shown only if port was closed; hidden when port was open."""
-    # 1. Port was closed: banner is displayed with router instructions
-    app_closed = _JoinTestApp(port_was_closed=True)
-    async with app_closed.run_test(size=(100, 40)) as pilot:
-        screen = app_closed.screen
+    # 1. Port was closed and opened: banner reports success
+    app_opened = _JoinTestApp(port_was_closed=True, firewall_opened=True)
+    async with app_opened.run_test(size=(100, 40)) as pilot:
+        screen = app_opened.screen
         router_banner = screen.query_one("#router_banner", Static)
         text = router_banner.render().plain
-        assert "closed in your firewall" in text
+        assert "opened automatically" in text
         assert "router settings" in text
         assert router_banner.styles.display == "block"
 
-    # 2. Port was open: banner remains hidden
+    # 2. Port was closed and opening failed: banner reports failure, not success
+    app_failed = _JoinTestApp(port_was_closed=True, firewall_opened=False)
+    async with app_failed.run_test(size=(100, 40)) as pilot:
+        screen = app_failed.screen
+        router_banner = screen.query_one("#router_banner", Static)
+        text = router_banner.render().plain
+        assert "could not be opened automatically" in text
+        assert "router settings" in text
+        assert router_banner.styles.display == "block"
+
+    # 3. Port was open: banner remains hidden
     app_open = _JoinTestApp(port_was_closed=False)
     async with app_open.run_test(size=(100, 40)) as pilot:
         screen = app_open.screen

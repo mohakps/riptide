@@ -2,7 +2,8 @@
 
 | Symptom | Most likely cause | Check |
 | --- | --- | --- |
-| Join times out, no error from Create | Create side is behind CGNAT, or port forward or firewall is missing | Behind CGNAT? Router forward for 50000 to the right LAN address? PC firewall allow for 50000? |
+| Join times out, no error from Create | Create side is behind CGNAT, or port forward or firewall is missing | Behind CGNAT? Router forward for 50000 to the right LAN address? PC firewall allow for 50000? Check the Create page banner for whether the firewall rule was opened or failed. |
+| Firewall rule was not opened automatically | Riptide was not run as admin on Windows, or sudo needed a password on Linux | Run the exact command shown on the Create page, as admin or with sudo, then click Create Server again. |
 | Address already in use on Create | Another Riptide is still listening, or another program uses 50000, for example DB2, Jenkins, or SAP | Close the old Riptide, or check what is listening on 50000, and stop it before retrying. |
 | It worked yesterday, not today | Public IP changed, or PC got a new LAN address | Use DDNS, share the new address, update the router forward to the new LAN address. |
 | Fingerprint changed, session aborts | Peer reinstalled, deleted `~/.riptide/`, or a different machine | Confirm with the peer, over another channel, that they reinstalled, then remove the old peer from config and trust the new fingerprint deliberately. |

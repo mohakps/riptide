@@ -41,15 +41,22 @@ class MenuScreen(Screen):
         if opt_id == "create":
             config = load_config()
             port = config.session_port
-            is_open = check_firewall_port(port)
-            config.firewall_port_open = is_open
+            # On clicking Create Server, check the OS firewall for the
+            # session port and open it automatically if it is closed.
+            # ensure_firewall_port uses sudo -n on Linux, so it fails
+            # fast instead of hanging on a password prompt when the
+            # user cannot open the firewall automatically. The Create
+            # page then reports opened or failed, with the manual
+            # command when opening failed.
+            from ..core.firewall import ensure_firewall_port
+
+            was_open, opened, is_open_now = ensure_firewall_port(port)
+            config.firewall_port_open = is_open_now
             save_config(config)
 
-            port_was_closed = not is_open
-            if port_was_closed:
-                open_firewall_port(port)
-
-            self.app.push_screen(JoinScreen(port_was_closed=port_was_closed))
+            self.app.push_screen(
+                JoinScreen(port_was_closed=not was_open, firewall_opened=opened)
+            )
         elif opt_id == "join":
             self.app.push_screen(CreateScreen())
 

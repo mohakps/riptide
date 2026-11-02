@@ -30,9 +30,10 @@ from ..theme import BANNER_CREATE
 
 
 class JoinScreen(Screen):
-    def __init__(self, port_was_closed: bool = False) -> None:
+    def __init__(self, port_was_closed: bool = False, firewall_opened: bool = False) -> None:
         super().__init__()
         self.port_was_closed = port_was_closed
+        self.firewall_opened = firewall_opened
         self.cwd = Path.cwd()
         self.config = load_config()
         self._pending: tuple[str, str] | None = None
@@ -83,11 +84,22 @@ class JoinScreen(Screen):
 
     def _show_router_banner(self) -> None:
         try:
+            from ..core.firewall import manual_firewall_command
+
             banner = self.query_one("#router_banner", Static)
-            banner.update(
-                f"Port {self.config.session_port} was closed in your firewall. "
-                f"An OS rule was added — please also forward port {self.config.session_port} (TCP) in your router settings."
-            )
+            port = self.config.session_port
+            if self.firewall_opened:
+                banner.update(
+                    f"Firewall: port {port} opened automatically. "
+                    f"Please also forward port {port} (TCP) in your router settings."
+                )
+            else:
+                command = manual_firewall_command(port)
+                banner.update(
+                    f"Firewall: port {port} was closed and could not be opened automatically. "
+                    f"Run as administrator, or with sudo: {command} "
+                    f"Then also forward port {port} (TCP) in your router settings."
+                )
             banner.styles.display = "block"
         except Exception:
             pass

@@ -52,7 +52,7 @@ On Join Server, saved devices appear as a list. Up and Down move in the list. Ta
 ## Setup, once, on the Create side
 
 1. Router: forward TCP port 50000 to your PC current LAN address. If your PC LAN address changes later, update the rule, or set a DHCP reservation for your PC in the router.
-2. PC firewall: allow inbound TCP on port 50000 for Riptide. On Windows, use Windows Defender Firewall, Advanced Settings, Inbound Rules. On Linux with `ufw`, run `sudo ufw allow 50000/tcp`. With `firewalld` or `iptables`, add the equivalent rule.
+2. PC firewall: when you click Create Server, Riptide checks TCP port 50000 in the OS firewall and adds a rule if it is closed. On Windows it uses netsh. On Linux it uses `ufw`, `firewalld`, `iptables`, or `nftables`, with passwordless sudo when needed. If Riptide cannot add the rule, because it is not run as admin, or sudo needs a password, the Create page shows the exact command to run manually. On Linux, that command is `sudo ufw allow 50000/tcp` for `ufw`, or the equivalent for your firewall tool.
 3. DDNS, if your public IP changes on router restart: set up a DDNS hostname, for example through your router DDNS settings or a DDNS client, and share the hostname, not the raw IP.
 
 The Join side normally needs no port forward and no inbound firewall rule, because it makes an outbound connection.
