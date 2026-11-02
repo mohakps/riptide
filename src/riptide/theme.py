@@ -624,7 +624,7 @@ ListView:focus > ListItem.--highlight Label {
 #download_composer .composer-label {
     width: 100%;
     height: 1;
-    color: #71717A;
+    color: #D7D7D7;
     text-style: bold;
     padding: 0;
     margin: 0;
@@ -634,8 +634,12 @@ ListView:focus > ListItem.--highlight Label {
     height: 3;
     border: round #3F3F46;
     background: transparent;
+    color: #D7D7D7;
     padding: 0 1;
     margin: 0;
+}
+#download_composer Input > .input--placeholder {
+    color: #D7D7D7;
 }
 #download_composer Input:focus {
     border: round #FF6B6B;
@@ -695,17 +699,17 @@ ProgressBar > .bar--bar {
 .progress-metric {
     width: 1fr;
     text-align: center;
-    color: #A1A1AA;
+    color: #FF6B6B;
 }
 .progress-metric-left {
     width: 1fr;
     text-align: left;
-    color: #A1A1AA;
+    color: #FF6B6B;
 }
 .progress-metric-right {
     width: 1fr;
     text-align: right;
-    color: #A1A1AA;
+    color: #FF6B6B;
 }
 #progress_file_row {
     width: 100%;
@@ -737,7 +741,7 @@ ProgressBar > .bar--bar {
     align: center middle;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.5);
 }
 #download_modal_overlay.active {
     display: block;
@@ -947,28 +951,74 @@ ProgressBar > .bar--bar {
     color: #71717A;
     margin: 0 0 1 0;
 }
-#create_bottom_section #fingerprint {
+/* Fingerprint Approval Modal Popup, like the download request modal */
+#fingerprint_modal_overlay {
+    layer: overlay;
+    display: none;
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+}
+#fingerprint_modal_overlay.active {
+    display: block;
+}
+#fingerprint_modal_card {
     width: 60;
-    max-width: 90%;
+    height: auto;
+    border: round #FF6B6B;
+    background: #18181B;
+    padding: 1 2;
+    align: center middle;
+}
+#fingerprint_modal_title {
+    width: 100%;
     text-align: center;
     color: #FFD166;
+    text-style: bold;
     margin: 0 0 1 0;
 }
-#create_actions {
+#fingerprint_modal_card #fingerprint_modal_body {
+    width: 100%;
+    text-align: center;
+    color: #E8E8E8;
+    margin: 0 0 1 0;
+}
+#fingerprint_modal_actions {
     width: 100%;
     height: auto;
-    layout: horizontal;
     align: center middle;
-    margin: 1 0 0 0;
-    padding: 0;
+    margin: 1 0;
 }
-#create_actions Button {
-    width: 22;
-    min-width: 22;
-    height: 3;
+#fingerprint_modal_actions Button {
     margin: 0 2;
+    min-width: 16;
+}
+#fingerprint_modal_actions Button.allow {
+    background: #78DC8C;
+    color: #121212;
     text-style: bold;
-    border: none;
+}
+#fingerprint_modal_actions Button.allow:focus {
+    background: #8EEC9F;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#fingerprint_modal_actions Button.deny {
+    background: #FF6B6B;
+    color: #121212;
+    text-style: bold;
+}
+#fingerprint_modal_actions Button.deny:focus {
+    background: #FF8787;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#fingerprint_modal_footer {
+    width: 100%;
+    text-align: center;
+    color: #71717A;
+    margin: 1 0 0 0;
 }
 #create_bottom_section #create {
     display: none;

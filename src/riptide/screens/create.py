@@ -173,12 +173,6 @@ class CreateScreen(Screen):
             ),
             Vertical(
                 Static("Status: idle", id="status"),
-                Static("", id="fingerprint"),
-                Horizontal(
-                    Button("Allow", id="allow", classes="allow"),
-                    Button("Deny", id="deny", classes="deny"),
-                    id="create_actions",
-                ),
                 Button("Join Server", id="create", classes="primary"),
                 id="create_bottom_section",
             ),
@@ -192,11 +186,36 @@ class CreateScreen(Screen):
             Label(r"[bold #E8E8E8]\[Esc][/] [dim #FFFFFF]Back[/]", classes="keymap-item keymap-right"),
             id="footer_bar",
         )
+        # Fingerprint approval as a centered popup overlay, like the
+        # download approval request on the session page. The old
+        # inline prompt sat in the bottom section and wrapped out
+        # of the visible area on narrow screens.
+        yield Vertical(
+            Vertical(
+                Static("🔑  FINGERPRINT", id="fingerprint_modal_title"),
+                Static("", id="fingerprint_modal_body"),
+                Horizontal(
+                    Button("Allow", id="allow", classes="allow"),
+                    Button("Deny", id="deny", classes="deny"),
+                    id="fingerprint_modal_actions",
+                ),
+                Static(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Allow[/]    [bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Deny[/]", id="fingerprint_modal_footer"),
+                id="fingerprint_modal_card",
+            ),
+            id="fingerprint_modal_overlay",
+        )
 
     def _set_allow_visible(self, visible: bool) -> None:
         try:
-            actions = self.query_one("#create_actions", Horizontal)
-            actions.styles.display = "block" if visible else "none"
+            overlay = self.query_one("#fingerprint_modal_overlay", Vertical)
+            if visible:
+                overlay.add_class("active")
+                overlay.styles.display = "block"
+                if self._allow_btn:
+                    self._allow_btn.focus()
+            else:
+                overlay.remove_class("active")
+                overlay.styles.display = "none"
         except Exception:
             pass
         for btn in (self._allow_btn, self._deny_btn):
@@ -225,10 +244,17 @@ class CreateScreen(Screen):
         self._approved = False
         self._awaiting_approval = True
         self._approve_event.clear()
+        # Show the full fingerprint, split across two lines so it
+        # fits the 60-wide modal card instead of wrapping out of
+        # view. The first line alone is not enough to trust on.
+        first, rest = fingerprint[:32], fingerprint[32:]
+        body = (
+            f"Fingerprint:\n[bold #FFFFFF]{first}\n{rest}[/]\n\n"
+            f"[dim #A1A1AA]Allow to trust this creator?[/]"
+        )
         try:
             self.app.call_from_thread(
-                self.query_one("#fingerprint", Static).update,
-                f"Fingerprint: {fingerprint[:32]}... Allow to trust this creator?",
+                self.query_one("#fingerprint_modal_body", Static).update, body
             )
             self.app.call_from_thread(self._set_allow_visible, True)
         except Exception:
@@ -236,7 +262,7 @@ class CreateScreen(Screen):
         self._approve_event.wait(timeout=120)
         self._awaiting_approval = False
         try:
-            self.app.call_from_thread(self.query_one("#fingerprint", Static).update, "")
+            self.app.call_from_thread(self.query_one("#fingerprint_modal_body", Static).update, "")
             self.app.call_from_thread(self._set_allow_visible, False)
         except Exception:
             pass

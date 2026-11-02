@@ -30,7 +30,7 @@ riptide/
 ## Screens
 
 - `src/riptide/screens/menu.py`: Create Server, listener, on top, and Join Server, dialler, second. Handles menu selection and highlight prompts.
-- `src/riptide/screens/create.py`: Join Server page, the dialler. Saved devices list, hostname input with label, fingerprint approval, and dialling logic. The filename is historical, from before the v0.6.0 name swap.
+- `src/riptide/screens/create.py`: Join Server page, the dialler. Saved devices list, hostname input with label, fingerprint approval as a popup modal, and dialling logic. The filename is historical, from before the v0.6.0 name swap.
 - `src/riptide/screens/join.py`: Create Server page, the listener. Waiting card, incoming connection approval, public IP display, and listener worker. The filename is historical, from before the v0.6.0 name swap.
 - `src/riptide/screens/session_screen.py`: File manager, selection, send, download request, download approval queue, progress display, and keyboard handling for the transfer page.
 - `src/riptide/screens/setup.py`: Earlier setup and UPnP helper screen. Checks firewall rules and tries UPnP discovery, with manual forwarding instructions as fallback.
