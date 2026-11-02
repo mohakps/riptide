@@ -739,19 +739,22 @@ ProgressBar > .bar--bar {
     layer: base;
 }
 
-/* Download Request Modal Popup (centered, solid dark grey background).
+/* Download Request Modal Popup (centered, blank background).
    A terminal cell has one solid background colour, so true alpha
    blending over the page below is not possible: rgba(0,0,0,0.5)
-   did not dim the page, it just rendered as an opaque layer. A
-   solid dark grey overlay is the reliable version of the same idea,
-   and the card stays darker (#18181B) with a red border on top. */
+   did not dim the page, it just rendered as an opaque layer.
+   Instead of a solid dark grey overlay, the overlay is
+   transparent: its full-screen widget still writes blank spaces
+   into the cells outside the card, covering the page below,
+   while the background stays the terminal background. The card
+   itself stays solid, with a red border on top. */
 #download_modal_overlay {
     layer: overlay;
     display: none;
     align: center middle;
     width: 100%;
     height: 100%;
-    background: #27272A;
+    background: transparent;
 }
 #download_modal_overlay.active {
     display: block;
@@ -761,9 +764,9 @@ ProgressBar > .bar--bar {
     max-width: 90%;
     height: auto;
     border: round #FF6B6B;
-    /* Popup inside is dark grey too, not near-black. #3F3F46 is a
-       lighter dark grey than the #27272A overlay, so the card still
-       stands out against it, with its red border. */
+    /* Popup inside is dark grey, #3F3F46, so the card still
+       stands out against the blank background outside it,
+       with its red border. */
     background: #3F3F46;
     padding: 1 2;
     align: center middle;
@@ -966,15 +969,16 @@ ProgressBar > .bar--bar {
     margin: 0 0 1 0;
 }
 /* Fingerprint Approval Modal Popup, like the download request modal.
-   Solid dark grey, for the same reason as the download overlay:
-   terminal cells cannot blend alpha over the page below. */
+   Blank background, for the same reason as the download overlay:
+   the overlay widget writes blank spaces outside the card, while
+   the background stays the terminal background. */
 #fingerprint_modal_overlay {
     layer: overlay;
     display: none;
     align: center middle;
     width: 100%;
     height: 100%;
-    background: #27272A;
+    background: transparent;
 }
 #fingerprint_modal_overlay.active {
     display: block;
@@ -984,7 +988,8 @@ ProgressBar > .bar--bar {
     max-width: 90%;
     height: auto;
     border: round #FF6B6B;
-    /* Same dark grey as the download card, lighter than the overlay. */
+    /* Same dark grey as the download card, standing out against
+       the blank background outside it. */
     background: #3F3F46;
     padding: 1 2;
     align: center middle;

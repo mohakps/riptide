@@ -130,14 +130,14 @@ async def test_approved_download_shows_progress_and_sent(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_popup_overlays_are_dark_grey(tmp_path: Path):
+async def test_popup_overlays_are_blank(tmp_path: Path):
     # Session download modal overlay.
     app = _SessionApp(_DummySession(tmp_path))
     async with app.run_test(size=(120, 50)) as pilot:
         overlay = app.screen.query_one("#download_modal_overlay")
-        assert overlay.styles.background.hex.upper() == "#27272A"
+        assert overlay.styles.background.a == 0
     # Join fingerprint modal overlay.
     app2 = _CreateApp()
     async with app2.run_test(size=(100, 40)) as pilot:
         overlay = app2.screen.query_one("#fingerprint_modal_overlay")
-        assert overlay.styles.background.hex.upper() == "#27272A"
+        assert overlay.styles.background.a == 0
