@@ -55,6 +55,14 @@ class CreateScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="router_banner")
+        # Blank row in place of the banner's old bottom margin.
+        # A margin row belongs to no widget, so the menu's
+        # RIPTIDE logo underneath showed through it. This blank
+        # widget writes spaces into that row, covering the logo,
+        # while staying transparent itself. It is shown only
+        # together with the banner, so the no-banner layout
+        # does not gain an extra blank row.
+        yield Static("", id="router_banner_spacer")
         # Plain Vertical, not VerticalScroll: this page is only a
         # header and a waiting card, it never needs scrolling, and
         # the scroll container was showing a vertical scrollbar
@@ -130,6 +138,10 @@ class CreateScreen(Screen):
                     f"Then also forward port {port} (TCP) in your router settings."
                 )
             banner.styles.display = "block"
+            try:
+                self.query_one("#router_banner_spacer", Static).styles.display = "block"
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -144,6 +156,7 @@ class CreateScreen(Screen):
             banner = self.query_one("#router_banner", Static)
             banner.update("")
             banner.styles.display = "none"
+            self.query_one("#router_banner_spacer", Static).styles.display = "none"
         except Exception:
             pass
         self._firewall_banner_kind = None

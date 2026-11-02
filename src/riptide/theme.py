@@ -132,15 +132,6 @@ App, Screen {
     padding: 1 2;
     layers: base overlay;
 }
-/* Create Server is a full screen pushed on top of the menu.
-   With a transparent background, the menu's RIPTIDE logo shows
-   through in empty rows, for example the 1-row gap between the
-   yellow firewall banner and the CREATE header. An opaque
-   background paints those rows blank instead. This changes no
-   height, position, or alignment, only what shows in empty rows. */
-CreateScreen {
-    background: #121212 !important;
-}
 Static, Label {
     background: transparent;
     color: #E8E8E8;
@@ -444,17 +435,30 @@ ListView:focus > ListItem.--highlight Label {
     padding: 0;
     margin: 0;
 }
-/* Router port-forwarding notice, shown only when port was closed in OS firewall */
+/* Router port-forwarding notice, shown only when port was closed in OS firewall.
+   The banner text is not bold. The banner has no bottom margin:
+   the 1-row gap it used to leave is now a blank widget,
+   #router_banner_spacer, which writes blank spaces into that
+   row and so covers the menu's RIPTIDE logo underneath, while
+   the screen itself stays transparent. Total height before the
+   CREATE header is unchanged: banner height plus 1 blank row. */
 #router_banner {
     display: none;
     width: 100%;
     height: auto;
     background: #FFD166;
     color: #121212;
-    text-style: bold;
     text-align: center;
     padding: 1 2;
-    margin: 0 0 1 0;
+    margin: 0 0 0 0;
+}
+#router_banner_spacer {
+    display: none;
+    width: 100%;
+    height: 1;
+    background: transparent;
+    padding: 0;
+    margin: 0;
 }
 .session-header-text {
     color: #FF6B6B;
