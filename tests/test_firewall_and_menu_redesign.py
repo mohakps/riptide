@@ -333,8 +333,10 @@ class _DummySessionForModal:
     def request_download(self, *args, **kwargs):
         return True
 
-    def respond_download(self, name: str, request_id: str, allow: bool):
+    def respond_download(self, name: str, request_id: str, allow: bool, on_progress=None):
         self.responded.append((name, request_id, allow))
+        if allow and on_progress:
+            on_progress(name, 10, 10)
         return True
 
 

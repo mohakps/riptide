@@ -99,6 +99,10 @@ class SessionScreen(Screen):
         self._deny_btn: Button | None = None
         self._transfer_active: bool = False
         self._progress_visible: bool = False
+        self._complete_timer = None
+        self._complete_message_kind: str | None = None
+        self._received_files: list[str] = []
+        self._last_received_at: float = 0.0
 
     # -- header & connection display ----------------------------------
     def _get_peer_address(self) -> str:
@@ -399,13 +403,40 @@ class SessionScreen(Screen):
         except Exception:
             pass
 
+    def _cancel_complete_timer(self) -> None:
+        try:
+            if self._complete_timer is not None:
+                self._complete_timer.stop()
+        except Exception:
+            pass
+        self._complete_timer = None
+
+    def _hide_transfer_complete(self) -> None:
+        # Only the Sent message auto-hides. A Received message stays
+        # until the next transfer, so a list of files can be read.
+        if self._complete_message_kind != "sent":
+            return
+        if self._transfer_active or self._progress_visible:
+            return
+        self._complete_timer = None
+        self._complete_message_kind = None
+        try:
+            self.query_one("#transfer_complete_message", Static).styles.display = "none"
+            self.query_one("#progress_section", Vertical).styles.display = "none"
+        except Exception:
+            pass
+
     def _set_progress_visible(self, visible: bool) -> None:
         self._progress_visible = visible
+        if visible:
+            # A new transfer replaces any previous completion message,
+            # and must not be hidden by an old Sent-message timer.
+            self._cancel_complete_timer()
+            self._complete_message_kind = None
         try:
             section = self.query_one("#progress_section", Vertical)
             section.styles.display = "block" if visible else "none"
             if visible:
-                # A new transfer replaces any previous completion message.
                 self.query_one("#transfer_complete_message", Static).styles.display = "none"
                 self.query_one("#bar", ProgressBar).styles.display = "block"
                 self.query_one("#progress_metrics_row", Horizontal).styles.display = "block"
@@ -418,6 +449,7 @@ class SessionScreen(Screen):
         # In place of the progress bar, at the bottom of the page:
         # the progress section stays visible, but the bar, metrics
         # and file row are hidden and only the green statement shows.
+        # It goes away after 5 seconds.
         try:
             section = self.query_one("#progress_section", Vertical)
             section.styles.display = "block"
@@ -434,6 +466,41 @@ class SessionScreen(Screen):
             msg.styles.display = "block"
         except Exception:
             pass
+        self._complete_message_kind = "sent"
+        self._cancel_complete_timer()
+        try:
+            self._complete_timer = self.set_timer(5, self._hide_transfer_complete)
+        except Exception:
+            self._complete_timer = None
+
+    def _show_received_message(self) -> None:
+        # Receiver side, in the same place as the Sent message.
+        # One file: Received file "name" successfully.
+        # Several files: Received N files, then one file per line.
+        # No 5-second timer here, so a list can be read and scrolled.
+        # The message lives inside the page's VerticalScroll, so a
+        # long list scrolls with the page.
+        if not self._received_files:
+            return
+        try:
+            section = self.query_one("#progress_section", Vertical)
+            section.styles.display = "block"
+            self.query_one("#bar", ProgressBar).styles.display = "none"
+            self.query_one("#progress_metrics_row", Horizontal).styles.display = "none"
+            self.query_one("#progress_file_row", Horizontal).styles.display = "none"
+            if len(self._received_files) == 1:
+                text = f'Received file "{self._received_files[0]}" successfully.'
+            else:
+                lines = [f"Received {len(self._received_files)} files:"]
+                lines.extend(f"• {name}" for name in self._received_files)
+                text = "\n".join(lines)
+            msg = self.query_one("#transfer_complete_message", Static)
+            msg.update(text)
+            msg.styles.display = "block"
+        except Exception:
+            pass
+        self._complete_message_kind = "received"
+        self._cancel_complete_timer()
     def _show_next_download_approval(self) -> None:
         if not self._pending_downloads:
             try:
@@ -464,8 +531,34 @@ class SessionScreen(Screen):
             return
         name, rid = self._pending_downloads.pop(0)
         self._show_next_download_approval()
-        threading.Thread(target=lambda: self.session.respond_download(name, rid, allow), daemon=True).start()
+        if allow:
+            # Approved download, sent in a worker thread with progress,
+            # so the approver side gets the same progress bar and
+            # Sent message as a normal send. Previously respond_download
+            # sent with no progress callback, so the approver saw nothing.
+            self._received_files = []
+            threading.Thread(target=lambda: self._send_approved_download(name, rid), daemon=True).start()
+        else:
+            threading.Thread(target=lambda: self.session.respond_download(name, rid, False), daemon=True).start()
         self._set_status(f"{'Allowed' if allow else 'Denied'} download of {name}")
+
+    def _send_approved_download(self, name: str, request_id: str) -> None:
+        # Resolve the path the same way Session.respond_download does,
+        # so the progress batch total matches the file being sent.
+        path = Path(name).expanduser()
+        if not path.is_absolute():
+            path = self.session.cwd / path
+        total = path.stat().st_size if path.is_file() else 0
+        self._transfer_active = True
+        self.app.call_from_thread(self._set_progress_visible, True)
+
+        def on_file_prog(sent_name: str, sent: int, single_total: int) -> None:
+            self.app.call_from_thread(
+                self._on_progress, sent_name, sent, single_total, sent, total, "Sending"
+            )
+
+        ok = self.session.respond_download(name, request_id, True, on_progress=on_file_prog)
+        self.app.call_from_thread(self._finish_send, 1 if ok else 0, 0 if ok else 1)
 
     # -- status / progress --------------------------------------------
     def _set_status(self, text: str) -> None:
@@ -484,6 +577,19 @@ class SessionScreen(Screen):
         self._set_progress_visible(False)
         self._set_status(f"Received {name}: {'verified' if ok else 'FAILED ' + reason}")
         self._refresh_browser()
+        if not ok:
+            return
+        # Batch received files together: a sender sends files
+        # back to back, so a new batch is a gap of 10 seconds or
+        # more since the last received file, or a user-started
+        # send or download request, which clears the list below.
+        now = time.monotonic()
+        if self._last_received_at and now - self._last_received_at > 10:
+            self._received_files = []
+        self._last_received_at = now
+        if name not in self._received_files:
+            self._received_files.append(name)
+        self._show_received_message()
     def _on_progress(
         self,
         name: str,
@@ -604,6 +710,8 @@ class SessionScreen(Screen):
         if not self.selection:
             self._set_status("Failed: select at least one file first.")
             return
+        # A new user-started send ends any previous received batch.
+        self._received_files = []
         files = list(self.selection)
         self.selection = []
         # Set transfer-active before refreshing, so the download
@@ -655,6 +763,8 @@ class SessionScreen(Screen):
         if self.selection:
             self._set_status("Cannot download while files are selected to send. Send or unselect them first.")
             return
+        # A new download request ends any previous received batch.
+        self._received_files = []
         self._set_status(f"Waiting for peer approval for {name}...")
         ok = self.session.request_download(name, request_id=str(uuid.uuid4()))
         if not ok:

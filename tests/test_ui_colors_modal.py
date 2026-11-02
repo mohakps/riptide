@@ -79,7 +79,7 @@ async def test_session_colors_download_space_and_metrics(tmp_path: Path):
         assert screen.query_one("#progress_file_name", Label).styles.color.hex.upper() == "#E8E8E8"
         assert screen.query_one("#progress_file_size", Label).styles.color.hex.upper() == "#71717A"
         overlay = screen.query_one("#download_modal_overlay")
-        assert overlay.styles.background.a == 0.5
+        assert overlay.styles.background.hex.upper() == "#27272A"
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_fingerprint_modal_overlay():
         screen = app.screen
         overlay = screen.query_one("#fingerprint_modal_overlay")
         assert overlay.styles.display == "none"
-        assert overlay.styles.background.a == 0.5
+        assert overlay.styles.background.hex.upper() == "#27272A"
         # Old inline prompt is gone, modal body is the prompt now.
         assert not screen.query("#fingerprint")
         screen._set_allow_visible(True)

@@ -699,7 +699,7 @@ ProgressBar > .bar--bar {
 }
 #transfer_complete_message {
     width: 100%;
-    height: 1;
+    height: auto;
     text-align: center;
     color: #78DC8C;
     text-style: bold;
@@ -751,14 +751,19 @@ ProgressBar > .bar--bar {
     layer: base;
 }
 
-/* Download Request Modal Popup (dims background, centered) */
+/* Download Request Modal Popup (centered, solid dark grey background).
+   A terminal cell has one solid background colour, so true alpha
+   blending over the page below is not possible: rgba(0,0,0,0.5)
+   did not dim the page, it just rendered as an opaque layer. A
+   solid dark grey overlay is the reliable version of the same idea,
+   and the card stays darker (#18181B) with a red border on top. */
 #download_modal_overlay {
     layer: overlay;
     display: none;
     align: center middle;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.5);
+    background: #27272A;
 }
 #download_modal_overlay.active {
     display: block;
@@ -968,14 +973,16 @@ ProgressBar > .bar--bar {
     color: #71717A;
     margin: 0 0 1 0;
 }
-/* Fingerprint Approval Modal Popup, like the download request modal */
+/* Fingerprint Approval Modal Popup, like the download request modal.
+   Solid dark grey, for the same reason as the download overlay:
+   terminal cells cannot blend alpha over the page below. */
 #fingerprint_modal_overlay {
     layer: overlay;
     display: none;
     align: center middle;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.5);
+    background: #27272A;
 }
 #fingerprint_modal_overlay.active {
     display: block;

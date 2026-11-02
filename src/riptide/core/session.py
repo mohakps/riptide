@@ -222,10 +222,13 @@ class Session:
                 return False
         return True
 
-    def respond_download(self, name: str, request_id: str, allow: bool) -> bool:
+    def respond_download(self, name: str, request_id: str, allow: bool, on_progress=None) -> bool:
         """Peer side: answer a download_ask. On allow, send the
         file (absolute path, or relative to this side's cwd).
-        On deny, tell the requester, and send nothing."""
+        On deny, tell the requester, and send nothing.
+        on_progress, when given, is passed to send_file so the
+        approver side gets progress like a normal send. Without
+        it, the approver saw no progress bar at all."""
         if not allow:
             with self._send_lock:
                 try:
@@ -238,7 +241,7 @@ class Session:
             path = self.cwd / path
         # send_file only sends files, and its header carries only
         # the basename, so the receiver saves it in its own cwd.
-        return self.send_file(path)
+        return self.send_file(path, on_progress=on_progress)
 
     def send_ack(self, name: str, ok: bool, reason: str = "") -> None:
         with self._send_lock:
