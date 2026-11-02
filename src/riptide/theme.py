@@ -232,12 +232,12 @@ Input > .input--placeholder {
     color: #71717A;
 }
 .composer-label {
-    color: #71717A;
+    color: #D7D7D7;
     text-style: bold;
     padding: 1 0 0 0;
 }
 .composer-hint {
-    color: #71717A;
+    color: #D0D0D0;
     padding: 0 0 1 0;
 }
 .composer {
