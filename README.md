@@ -6,15 +6,13 @@ The name comes from Minecraft. Riptide is the trident enchantment that launches 
 
 ## Screenshots
 
-Add screenshots to a `screenshots/` folder next to this README, with these filenames.
+![Homepage](docs/screenshots/homepage.png)
 
-![Homepage](screenshots/homepage.png)
+![Create Server page](docs/screenshots/create-server.png)
 
-![Create Server page](screenshots/create-server.png)
+![Join Server page](docs/screenshots/join-server.png)
 
-![Join Server page](screenshots/join-server.png)
-
-![File transfer page](screenshots/transfer.png)
+![File transfer page](docs/screenshots/transfer.png)
 
 ## Features
 
@@ -31,7 +29,7 @@ Add screenshots to a `screenshots/` folder next to this README, with these filen
 - CGNAT check and public address display on Create Server. A red banner appears if CGNAT blocks inbound connections.
 - Dark grey terminal UI with a soft red accent, for Windows and Linux.
 
-Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [docs/security.md](docs/security.md).
+Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [Docs/Security](docs/security.md).
 
 ## Installation
 
@@ -55,24 +53,25 @@ Update:
 pipx upgrade riptide
 ```
 
-If upgrade fails, uninstall and install again:
+Uninstall:
 
 ```sh
 pipx uninstall riptide
-pipx install git+https://github.com/mohakps/riptide
 ```
+
+If upgrade fails, uninstall and install again.
 
 ## Usage
 
 Create Server listens. Join Server dials. Create stays on top in the menu.
 
-1. Create side, the public side: run `riptide`, choose Create Server, and share the public address or DDNS hostname shown on that page with the other person. Keep the page open.
-2. Join side, the CGNAT side or dialling side: run `riptide`, choose Join Server, enter the creator hostname or IP, or pick a saved device, and press Enter.
+1. Create side: run `riptide`, choose Create Server, and share the public address shown on that page or your DDNS hostname with the other person. Keep the page open.
+2. Join side: run `riptide`, choose Join Server, enter the creator hostname or IP, or pick a saved device, and press Enter.
 3. Approve the connection when asked, on either side.
 4. Send: select files with Space in the file manager, press Enter. Request: type a peer path in Download From Peer, press Enter, and wait for the peer to Allow it.
 5. Files arrive in the folder where the receiving side ran `riptide`.
 
-If the red CGNAT banner appears on Create Server, swap roles. Let the other side Create, and you Join. Full usage, shortcuts, and setup steps are in [docs/usage.md](docs/usage.md). Network terms and setup are in [docs/architecture.md](docs/architecture.md).
+If the red CGNAT banner appears on Create Server, swap roles. Let the other side Create, and you Join. Full usage, shortcuts, and setup steps are in [Docs/Usage](docs/usage.md). Learn more about CGNAT or who should create server in [Docs/Architecture](docs/architecture.md).
 
 ### Shortcuts
 
@@ -94,7 +93,7 @@ If the red CGNAT banner appears on Create Server, swap roles. Let the other side
 - No third party holds a copy, so privacy does not depend on a provider policy.
 - LAN speed when both PCs are on the same LAN, using a private LAN address.
 
-Full detail is in [docs/advantages.md](docs/advantages.md).
+Full details in [Docs/Advantages](docs/advantages.md).
 
 ## Limitations
 
@@ -107,15 +106,46 @@ Full detail is in [docs/advantages.md](docs/advantages.md).
 - You must exchange the creator address outside Riptide, by message or DDNS hostname.
 - Terminal only, Windows and Linux primarily. macOS is not specifically tested.
 
-Full detail, with workarounds where they exist, is in [docs/limitations.md](docs/limitations.md).
+Full detail, with workarounds where they exist, is in [Docs/Limitations](docs/limitations.md).
+
+## Project structure
+
+```
+riptide/
+├── src/riptide/
+│   ├── app.py
+│   ├── theme.py
+│   ├── screens/
+│   │   ├── menu.py
+│   │   ├── create.py
+│   │   ├── join.py
+│   │   ├── session_screen.py
+│   │   └── setup.py
+│   └── core/
+│       ├── session.py
+│       ├── identity.py
+│       ├── nat.py
+│       ├── config.py
+│       ├── file_select.py
+│       └── transfer.py
+├── tests/
+└── README.md
+```
+
+For detail structure, read [Docs/Project structure](docs/project-structure.md).
+
+## How this was built
+
+- Meta Muse: primary assistant for panning, implementation, testing, and documentation.
+- Gemini 3.8 Flash: TUI Design
+
+Human decisions, testing on real machines, and final choices about names, ports, and behaviour are the author's. AI-generated code was tested, not trusted blindly. The test suite and headless Textual pilots are part of the workflow, and live two-machine testing is what proves a transfer.
 
 ## Docs
 
-- [Usage](docs/usage.md): detailed usage, shortcuts, setup steps, update and uninstall.
-- [Architecture](docs/architecture.md): terminology, layers, protocol, flows, and NAT behaviour.
-- [Security](docs/security.md): full security detail.
-- [Advantages](docs/advantages.md): full advantages.
-- [Limitations](docs/limitations.md): full limitations.
-- [Troubleshooting](docs/troubleshooting.md): symptom, cause, and check, in table form.
-- [Project structure](docs/project-structure.md): project layout, with per-file explanations.
-- [Sources and references](docs/sources-references.md): references, contributions, and how to contribute.
+- [Architecture](docs/architecture.md)
+- [Security](docs/security.md)
+- [Advantages](docs/advantages.md)
+- [Limitations](docs/limitations.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Sources and references](docs/sources-references.md)

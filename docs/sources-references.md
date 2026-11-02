@@ -4,10 +4,10 @@
 
 Riptide was built by its author, with AI assistance disclosed here:
 
-- Meta Muse: primary assistant for design discussion, implementation, testing, and documentation, including the session and Join rework, the Create and Join name swap, the CGNAT banner, the sender speed fix, and this README and docs set.
-- Gemini 3.8 Flash: also used as an assistant during development.
+- Meta Muse: primary assistant for design discussion, implementation, testing, and documentation, including the session and Join rework, the and this README.
+- Gemini 3.8 Flash: TUI Design.
 
-Human decisions, testing on real machines, and final choices about names, ports, and behaviour are the author's. AI-generated code was tested, not trusted blindly. The test suite and headless Textual pilots are part of the workflow, and live two-machine testing is what proves a transfer.
+AI-generated code was tested, not trusted blindly. The test suite and headless Textual pilots are part of the workflow, and live two-machine testing is what proves a transfer.
 
 ## References
 
