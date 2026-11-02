@@ -17,7 +17,7 @@ from riptide.core.firewall import (
     manual_firewall_command,
     open_firewall_port,
 )
-from riptide.screens.join import JoinScreen
+from riptide.screens.create import CreateScreen
 from riptide.screens.menu import MenuScreen
 from riptide.theme import BANNER_CLIENT, BANNER_CREATE, BANNER_HOST, BANNER_JOIN, CSS
 
@@ -39,7 +39,7 @@ class _JoinTestApp(App):
 
     def on_mount(self):
         self.push_screen(
-            JoinScreen(port_was_closed=self.port_was_closed, firewall_opened=self.firewall_opened)
+            CreateScreen(port_was_closed=self.port_was_closed, firewall_opened=self.firewall_opened)
         )
 
 
@@ -349,7 +349,7 @@ class _SessionModalApp(App):
 
     def on_mount(self):
         from riptide.screens.session_screen import SessionScreen
-        self.push_screen(SessionScreen(self._session, role="creator"))
+        self.push_screen(SessionScreen(self._session, role="host"))
 
 
 @pytest.mark.asyncio

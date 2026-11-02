@@ -86,7 +86,7 @@ Riptide accepts IPv6 hosts, with or without brackets. IPv6 only helps if both si
 | Situation | Action |
 | --- | --- |
 | Both on the same LAN | Dial the other PC private LAN address directly. No port forward, public IP, or DDNS needed. |
-| Create side public, Join side CGNAT | Normal Riptide case. Create forwards 50000, Join dials the creator public IP or DDNS hostname. |
+| Create side public, Join side CGNAT | Normal Riptide case. Create forwards 50000, Join dials the host public IP or DDNS hostname. |
 | Both sides public | Either side can Create, the other Joins. |
 | Both behind CGNAT on IPv4, neither has IPv6 | No direct connection. You need a third reachable peer, a relay, or IPv6. |
 | Both have global IPv6 | Connect over IPv6. CGNAT on IPv4 does not matter. |
@@ -119,8 +119,8 @@ flowchart TB
 ```mermaid
 flowchart TD
     Menu["Menu, Create Server and Join Server"]
-    Create["Create Server, listener, bind 0.0.0.0:50000, TLS server, show public IP, check CGNAT"]
-    Join["Join Server, dialler, read hostname, TCP connect to creator:50000, TLS client"]
+    Create["Create Server, listener, bind 0.0.0.0:50000, TLS server, show public IP"]
+    Join["Join Server, dialler, read hostname, TCP connect to host:50000, TLS client"]
     Handshake["TLS handshake plus hello, device names exchanged, fingerprint approval"]
     Session["Session, one TCP plus TLS connection, reader loop, send lock, heartbeat"]
     Send["Send, file header plus bytes, SHA-256 precomputed, 128 KB chunks"]
@@ -139,7 +139,7 @@ flowchart TD
 
 ### Listener
 
-The Create side creates a TCP listening socket on all interfaces, `0.0.0.0:50000`, wraps it in a TLS server context with its own self-signed certificate, and blocks in `accept()`. It does not yet know who will connect. In parallel, it fetches its public IP and runs the CGNAT check, so the user sees, before anyone connects, whether inbound connections can reach this machine.
+The Create side creates a TCP listening socket on all interfaces, `0.0.0.0:50000`, wraps it in a TLS server context with its own self-signed certificate, and blocks in `accept()`. It does not yet know who will connect. In parallel, it fetches its public IP, so the user sees the address to share with the client.
 
 The listener socket closes when the page is left, so a later Create Server page in the same process can bind the same port again.
 
@@ -149,23 +149,23 @@ The Join side parses the hostname input to a bare host, opens a TCP connection t
 
 ```mermaid
 sequenceDiagram
-    participant J as "Joiner dialler"
-    participant JN as "Joiner NAT CGNAT"
+    participant J as "Client dialler"
+    participant JN as "Client NAT CGNAT"
     participant I as Internet
-    participant CR as "Creator router"
-    participant C as "Creator listener"
-    J->>JN: TCP SYN to creator:50000
+    participant CR as "Host router"
+    participant C as "Host listener"
+    J->>JN: TCP SYN to host:50000
     JN->>I: SYN, source rewritten to public IP
-    I->>CR: SYN to creator public IP:50000
-    CR->>C: Port forward to creator PC:50000
+    I->>CR: SYN to host public IP:50000
+    CR->>C: Port forward to host PC:50000
     C->>CR: SYN-ACK
     CR->>I: SYN-ACK, source rewritten back
     I->>JN: SYN-ACK
-    JN->>J: SYN-ACK to joiner PC
+    JN->>J: SYN-ACK to client PC
     J->>C: ACK, then TLS handshake, then hello
 ```
 
-If the creator is behind CGNAT, the SYN is dropped at the ISP CGNAT box, because there is no mapping for it, and the connection times out. That timeout, with no error from a NAT box, is usually what a CGNAT failure looks like.
+If the host is behind CGNAT, the SYN is dropped at the ISP CGNAT box, because there is no mapping for it, and the connection times out. That timeout, with no error from a NAT box, is usually what a CGNAT failure looks like.
 
 ### Trust on first use
 
@@ -204,7 +204,6 @@ The length is the length of the JSON header only, not the file. The receiver rea
 | `ping` and `pong` | Either, every 10 s idle | Heartbeat, so NAT and firewall idle timeouts do not close a quiet session. TCP keepalive is also enabled. |
 | `error` | Either | For example, "no such file" for a download request. |
 | `bye` | Either, on leave | Clean session close. |
-| `request` | Legacy only | Direct file request by basename, kept for tests and old clients. The UI uses `download_ask`. |
 
 ### Sending a file
 
@@ -263,19 +262,19 @@ The requested name can be absolute on the peer, or relative to the peer launch f
 
 ```mermaid
 flowchart LR
-    JP["Joiner PC, 192.168.1.10"] --> JR["Joiner home router, NAT"]
-    JR --> JC["Joiner ISP CGNAT, 100.64.x.x to public"]
+    JP["Client PC, 192.168.1.10"] --> JR["Client home router, NAT"]
+    JR --> JC["Client ISP CGNAT, 100.64.x.x to public"]
     JC --> NET["Internet"]
-    NET --> CR["Creator router, public IP, forward 50000"]
-    CR --> CP["Creator PC, 192.168.1.20:50000, listening"]
+    NET --> CR["Host router, public IP, forward 50000"]
+    CR --> CP["Host PC, 192.168.1.20:50000, listening"]
 ```
 
-Packet view, for one SYN from joiner to creator:
+Packet view, for one SYN from client to host:
 
-1. Joiner PC sends from `192.168.1.10:ephemeral` to `creator-public-IP:50000`.
-2. Joiner home router rewrites source to its WAN address, for example `100.64.1.10:ephemeral2`, and remembers the mapping.
+1. Client PC sends from `192.168.1.10:ephemeral` to `host-public-IP:50000`.
+2. Client home router rewrites source to its WAN address, for example `100.64.1.10:ephemeral2`, and remembers the mapping.
 3. ISP CGNAT rewrites source again to a shared public IP and port, and remembers that mapping.
-4. Creator router receives the packet at its public IP on port 50000, applies the port-forward rule, and rewrites destination to `192.168.1.20:50000`.
-5. Creator PC replies, and each NAT box reverses its mapping on the way back.
+4. Host router receives the packet at its public IP on port 50000, applies the port-forward rule, and rewrites destination to `192.168.1.20:50000`.
+5. Host PC replies, and each NAT box reverses its mapping on the way back.
 
-If step 4 has no port-forward rule, or step 3 has no outbound mapping because the creator never dialled out, the packet is dropped. There is no error message from a NAT box, just silence and then a timeout, which is why CGNAT failures are confusing to debug.
+If step 4 has no port-forward rule, or step 3 has no outbound mapping because the host never dialled out, the packet is dropped. There is no error message from a NAT box, just silence and then a timeout, which is why CGNAT failures are confusing to debug.

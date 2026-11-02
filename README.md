@@ -66,7 +66,7 @@ If upgrade fails, uninstall and install again.
 Create Server listens. Join Server dials. Create stays on top in the menu.
 
 1. Create side: run `riptide`, choose Create Server, and share the public address shown on that page or your DDNS hostname with the other person. Keep the page open.
-2. Join side: run `riptide`, choose Join Server, enter the creator hostname or IP, or pick a saved device, and press Enter.
+2. Join side: run `riptide`, choose Join Server, enter the host hostname or IP, or pick a saved device, and press Enter.
 3. Approve the connection when asked, on either side.
 4. Send: select files with Space in the file manager, press Enter. Request: type a peer path in Download From Peer, press Enter, and wait for the peer to Allow it.
 5. Files arrive in the folder where the receiving side ran `riptide`.
@@ -103,7 +103,7 @@ Full details in [Docs/Advantages](docs/advantages.md).
 - No resume for an interrupted file. It restarts from the start.
 - One file at a time, in batch order. No parallel streams.
 - Both sides must be online together. No offline queue.
-- You must exchange the creator address outside Riptide, by message or DDNS hostname.
+- You must exchange the host address outside Riptide, by message or DDNS hostname.
 - Terminal only, Windows and Linux primarily. macOS is not specifically tested.
 
 Full detail, with workarounds where they exist, is in [Docs/Limitations](docs/limitations.md).
@@ -119,16 +119,18 @@ riptide/
 │   │   ├── menu.py
 │   │   ├── create.py
 │   │   ├── join.py
-│   │   ├── session_screen.py
-│   │   └── setup.py
+│   │   └── session_screen.py
 │   └── core/
 │       ├── session.py
 │       ├── identity.py
 │       ├── nat.py
 │       ├── config.py
 │       ├── file_select.py
+│       ├── firewall.py
+│       ├── focus.py
 │       └── transfer.py
 ├── tests/
+├── REMOVED.md
 └── README.md
 ```
 

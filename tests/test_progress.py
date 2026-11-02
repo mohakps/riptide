@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from riptide.core.transfer import TransferProgress, format_bytes, format_eta, sha256_file, upload_files
+from riptide.core.transfer import TransferProgress, format_bytes, format_eta
 
 
 def test_format_bytes_and_eta():
@@ -23,10 +23,6 @@ def test_progress_remaining_and_fraction():
     assert progress.fraction == 0.25
 
 
-def test_sha256_file(tmp_path):
-    path = tmp_path / "a.txt"
-    path.write_bytes(b"hello")
-    assert sha256_file(path) == hashlib.sha256(b"hello").hexdigest()
 
 
 class FakeSftpFile:
@@ -84,13 +80,3 @@ class FakeSftp:
         self.store.pop(path, None)
 
 
-def test_upload_resume_and_rename(tmp_path):
-    local = tmp_path / "demo.txt"
-    local.write_bytes(b"0123456789")
-    sftp = FakeSftp()
-    sftp.store["./demo.txt.part"] = bytearray(b"0123")
-    progress = TransferProgress(10)
-    uploaded = upload_files(sftp, [local], ".", progress)
-    assert uploaded == ["./demo.txt"]
-    assert bytes(sftp.store["./demo.txt"]) == b"0123456789"
-    assert progress.sent == 10

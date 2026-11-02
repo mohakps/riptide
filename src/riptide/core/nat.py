@@ -1,4 +1,4 @@
-"""NAT / CGNAT helpers. User-facing text never contains a port number."""
+"""Public IP helpers. User-facing text never contains a port number."""
 from __future__ import annotations
 
 import ipaddress
@@ -41,7 +41,7 @@ def public_ip() -> str | None:
     """Current public address, STUN first, HTTPS fallback.
 
     Returns None if neither works. This is the address the Create
-    Server page shows, so the joiner knows what to dial. Behind
+    Server page shows, so the client knows what to dial. Behind
     CGNAT it is the shared CGNAT address, not a directly reachable
     one.
     """
@@ -60,44 +60,9 @@ def public_ip() -> str | None:
     return None
 
 
-def local_ip() -> str:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("8.8.8.8", 80))
-            return str(sock.getsockname()[0])
-    except Exception:
-        return "127.0.0.1"
 
 
-def upnp_attempt() -> tuple[bool, str]:
-    """Best-effort UPnP. Returns (ok, message) without ever promising success."""
-    try:
-        import miniupnpc  # type: ignore
-    except Exception:
-        return False, "UPnP library not available. Use the manual step below."
-    try:
-        upnp = miniupnpc.UPnP()
-        upnp.discoverdelay = 200
-        upnp.discover()
-        upnp.selectigd()
-        return True, "UPnP gateway found. If it reports success, forwarding is set."
-    except Exception as exc:
-        return False, f"UPnP failed: {exc}"
 
 
-def manual_instructions(local: str) -> str:
-    return (
-        "Manual forwarding: in your router, forward SSH to this computer "
-        f"(local address {local}). If your router offers an SSH service preset, "
-        "use that preset. If you are behind CGNAT, forwarding will not work: "
-        "use reverse mode instead, where the CGNAT peer dials the public peer, "
-        "and the file direction is independent of the connection direction."
-    )
 
 
-REVERSE_MODE_TEXT = (
-    "Reverse mode: if the receiver is behind CGNAT, the sender cannot dial it. "
-    "Instead, the CGNAT peer dials the public peer first. Over that connection "
-    "the CGNAT peer can either push a file up or pull a file down. "
-    "Connection direction and file direction are independent."
-)

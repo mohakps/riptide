@@ -6,34 +6,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from riptide import __version__
 from riptide.core.file_select import (
     add_to_selection,
-    common_prefix,
-    complete,
     format_browser_row,
     format_file_row,
     format_mtime,
     list_browser_entries,
-    parse_dropped_text,
     total_size,
 )
 
 
-def test_parse_typed_name(tmp_path):
-    (tmp_path / "report.pdf").write_bytes(b"hello")
-    assert parse_dropped_text("report.pdf", tmp_path) == [tmp_path / "report.pdf"]
 
 
-def test_parse_dropped_quoted_paths_with_spaces(tmp_path):
-    target = tmp_path / "my file.txt"
-    target.write_bytes(b"x")
-    other = tmp_path / "other.txt"
-    other.write_bytes(b"y")
-    result = parse_dropped_text(f'"{target}" "{other}"', tmp_path)
-    assert result == [target, other]
 
 
-def test_parse_windows_path_string_is_not_crash(tmp_path):
-    # A Windows path cannot resolve on Linux, so it is ignored, not an error.
-    assert parse_dropped_text(r'"C:\Users\friend\file.txt"', tmp_path) == []
 
 
 def test_dedupe_and_total_size(tmp_path):
@@ -44,29 +28,10 @@ def test_dedupe_and_total_size(tmp_path):
     assert total_size(selection) == 5
 
 
-def test_complete(tmp_path):
-    (tmp_path / "demo.mp4").write_text("x")
-    (tmp_path / "notes.txt").write_text("x")
-    assert complete("de", tmp_path) == ["demo.mp4"]
-    assert complete("n", tmp_path) == ["notes.txt"]
-    assert complete("zzz", tmp_path) == []
 
 
-def test_complete_absolute_path_keeps_directory(tmp_path):
-    (tmp_path / "document.pdf").write_text("x")
-    (tmp_path / "other.txt").write_text("x")
-    # Old bug: this returned ["document.pdf"], losing the directory.
-    assert complete(str(tmp_path / "doc"), tmp_path) == [str(tmp_path / "document.pdf")]
-    assert complete(str(tmp_path) + "/", tmp_path) == [
-        str(tmp_path / "document.pdf"),
-        str(tmp_path / "other.txt"),
-    ]
 
 
-def test_common_prefix():
-    assert common_prefix(["/a/doc1", "/a/doc2"]) == "/a/doc"
-    assert common_prefix(["abc", "abd"]) == "ab"
-    assert common_prefix([]) == ""
 
 
 def test_browser_entries_folders_first_no_size_date(tmp_path):

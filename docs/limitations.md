@@ -6,7 +6,7 @@
 - No resume for an interrupted file. Workaround: restart that file from the start. The `.part` file is kept on hash mismatch or interruption, but it is not resumed yet.
 - One file at a time, in batch order. No parallel streams. This is simpler and more reliable, but it does not saturate a very fast link as well as parallel streams could.
 - Both sides must be online together. No offline queue, and no send now, receive later.
-- No discovery. You must exchange the creator address outside Riptide, by message, call, or DDNS hostname. Riptide does not find your peer for you.
+- No discovery. You must exchange the host address outside Riptide, by message, call, or DDNS hostname. Riptide does not find your peer for you.
 - Terminal only, Windows and Linux primarily. No graphical interface, no mobile app. macOS is not specifically tested.
 - No compression, deduplication, or delta sync. A file is sent whole, every time, even if the receiver already has most of it.
 - Trust is manual. Fingerprint approval is a real security decision, and a careless Allow on a first connection defeats it. See [security.md](security.md).

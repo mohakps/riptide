@@ -1,17 +1,17 @@
-"""Create / Join session protocol, v2.
+"""Create / Join session protocol.
 
-One TLS connection, started by the CGNAT side (the creator) dialling
-the public side (the joiner). After that one connection is live,
-file direction is independent of who created or joined:
+One TLS connection, started by the Join side (the client) dialling
+the Create side (the host). After that one connection is live,
+file direction is independent of connection direction:
 
 - either side can Send (push a local file to the other side)
 - either side can Download (request a file from the other side)
 
 No pairing code, no pairing listener, no SSH. Authentication is
 fingerprint-based, like SSH host keys:
-- the creator checks the joiner's certificate fingerprint, and
+- the client checks the host certificate fingerprint, and
   presses Allow on first connect, or aborts if it changed;
-- the joiner sees the creator's device name and certificate
+- the host sees the client device name and certificate
   fingerprint, and presses Allow to accept the session.
 
 Framing: 4-byte big-endian length + JSON header, then, for a
@@ -47,7 +47,7 @@ def parse_host_input(text: str) -> str:
     - a hostname: metalvoid.ddns.net
     - an IPv4 address: 192.168.1.10
     - an IPv6 address: 2001:db8::1, or [2001:db8::1]
-    - user@host, for compatibility with the v3 input: user@metalvoid.ddns.net,
+    - user@host: user@metalvoid.ddns.net,
       user@192.168.1.10, user@[2001:db8::1]
     - host:port, if a port was typed anyway, is stripped for plain
       hostnames / IPv4; a bare IPv6 address is never split on ':'.
@@ -88,10 +88,10 @@ def parse_host_input(text: str) -> str:
 
 def _set_keepalive(sock) -> None:
     """Blocking socket + TCP keepalive, so an idle session does not
-    time out. This is the v2 idle-cutoff fix: socket.create_connection
-    left a 30-second timeout on the creator socket, so recv() timed
-    out after 30 seconds of no file transfer and the reader loop
-    ended the session. Blocking mode + keepalive removes that."""
+    time out. socket.create_connection leaves a 30-second timeout
+    on the client socket, so recv() timed out after 30 seconds of
+    no file transfer and the reader loop ended the session.
+    Blocking mode + keepalive removes that."""
     try:
         sock.settimeout(None)
     except Exception:
@@ -126,8 +126,8 @@ def _send_header(sock, header: dict) -> None:
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
                  peer_host: str = "",
-                 on_file_received=None, on_ack=None, on_status=None, on_error=None,
-                 on_ssh_download_request=None, on_progress=None,
+                 on_file_received=None, on_ack=None, on_error=None,
+                 on_progress=None,
                  on_download_ask=None, on_download_denied=None):
         self.sock = sock
         self.cwd = Path(cwd)
@@ -135,10 +135,8 @@ class Session:
         self.peer_device = peer_device
         self.peer_host = peer_host
         self.peer_fingerprint = ""
-        self.on_ssh_download_request = on_ssh_download_request
         self.on_file_received = on_file_received
         self.on_ack = on_ack
-        self.on_status = on_status
         self.on_error = on_error
         self.on_progress = on_progress
         self.on_download_ask = on_download_ask
@@ -192,20 +190,6 @@ class Session:
                 return False
         return True
 
-    def request_file(self, name: str) -> bool:
-        # Legacy direct request: only a file in this side's cwd,
-        # by basename. Kept for tests and old clients. The UI
-        # no longer uses this for downloads; it uses
-        # request_download() below, which asks for approval and
-        # allows absolute paths.
-        with self._send_lock:
-            try:
-                _send_header(self.sock, {"type": "request", "name": name})
-            except Exception as exc:
-                if self.on_error is not None:
-                    self.on_error(f"request failed: {exc}")
-                return False
-        return True
 
     def request_download(self, name: str, request_id: str = "") -> bool:
         """Ask the peer for approval to download a file.
@@ -250,24 +234,7 @@ class Session:
             except Exception:
                 pass
 
-    def send_ssh_download_request(self, name: str) -> bool:
-        """Control message only: ask the other side to download this
-        file from me via SSH/SFTP. No file bytes travel over TLS here."""
-        with self._send_lock:
-            try:
-                _send_header(self.sock, {"type": "ssh_download_request", "name": name})
-            except Exception as exc:
-                if self.on_error is not None:
-                    self.on_error(f"ssh download request failed: {exc}")
-                return False
-        return True
 
-    def send_info(self, text: str) -> None:
-        with self._send_lock:
-            try:
-                _send_header(self.sock, {"type": "info", "message": text})
-            except Exception:
-                pass
 
     # -- receiving ------------------------------------------------
     def start(self) -> None:
@@ -305,8 +272,6 @@ class Session:
                 kind = header.get("type")
                 if kind == "file":
                     self._receive_file(header)
-                elif kind == "request":
-                    self._handle_request(header.get("name", ""))
                 elif kind == "download_ask":
                     if self.on_download_ask is not None:
                         self.on_download_ask(str(header.get("name", "")), str(header.get("id", "")))
@@ -325,12 +290,6 @@ class Session:
                         pass
                 elif kind == "pong":
                     pass
-                elif kind == "ssh_download_request":
-                    if self.on_ssh_download_request is not None:
-                        self.on_ssh_download_request(str(header.get("name", "")))
-                elif kind == "info":
-                    if self.on_status is not None:
-                        self.on_status(str(header.get("message", "")))
                 elif kind == "bye":
                     break
                 elif kind == "error":
@@ -396,19 +355,6 @@ class Session:
         # with file bytes: file bytes are already fully read here.
         self.send_ack(name, ok, "" if ok else "SHA-256 mismatch")
 
-    def _handle_request(self, name: str) -> None:
-        safe = Path(name).name
-        path = self.cwd / safe
-        if not path.is_file():
-            with self._send_lock:
-                try:
-                    _send_header(self.sock, {"type": "error", "message": f"no such file: {safe}"})
-                except Exception:
-                    pass
-            return
-        # send_file acquires the lock itself; the reader loop is not
-        # holding it while reading, so this cannot deadlock.
-        self.send_file(path)
 
     def close(self) -> None:
         self._running = False
@@ -431,28 +377,8 @@ def _read_header(sock) -> dict:
     return json.loads(_recv_exact(sock, length).decode())
 
 
-def exchange_ssh_keys_server(tls, home) -> None:
-    """Join side: read creator's SSH public key, add it, reply with own key."""
-    from .keys import append_authorized_key, ensure_keypair, public_key_text
-    header = _read_header(tls)
-    if header.get("type") != "ssh_key":
-        raise ConnectionError("expected ssh_key exchange")
-    append_authorized_key(str(header.get("key", "")), home=home)
-    _private, _public = ensure_keypair(home)
-    own = public_key_text(home) or ""
-    _send_header(tls, {"type": "ssh_key_ok", "key": own})
 
 
-def exchange_ssh_keys_client(tls, home) -> None:
-    """Creator side: send own SSH public key, read joiner's key, add it."""
-    from .keys import append_authorized_key, ensure_keypair, public_key_text
-    _private, _public = ensure_keypair(home)
-    own = public_key_text(home) or ""
-    _send_header(tls, {"type": "ssh_key", "key": own})
-    header = _read_header(tls)
-    if header.get("type") != "ssh_key_ok":
-        raise ConnectionError("expected ssh_key_ok exchange")
-    append_authorized_key(str(header.get("key", "")), home=home)
 
 
 def _server_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
@@ -460,9 +386,9 @@ def _server_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
     ctx.load_cert_chain(str(cert_path), str(key_path))
     # CERT_NONE here, because a self-signed client cert would fail
     # Python's built-in verification even with CERT_OPTIONAL.
-    # The strong check in v2 is the creator checking the joiner's
-    # server certificate fingerprint; the joiner approves the
-    # creator by device name in the UI before the session opens.
+    # The strong check is the client checking the host
+    # server certificate fingerprint; the host approves the
+    # client by device name in the UI before the session opens.
     ctx.verify_mode = ssl.CERT_NONE
     ctx.check_hostname = False
     return ctx
@@ -476,24 +402,23 @@ def _client_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
     return ctx
 
 
-class JoinListener:
-    """Join side: listen for one creator, approve it in the UI, return a Session.
+class HostListener:
+    """Host side: listen for one client, approve it in the UI, return a Session.
 
     approve(device, fingerprint) -> bool is called in the listener
     thread; the UI must answer it (in tests it can auto-approve).
     """
 
     def __init__(self, port: int, cwd: Path, device: str, home: Path | None = None,
-                 approve=None, on_status=None):
+                 approve=None):
         self.port = port
         self.cwd = Path(cwd)
         self.device = device
         self.home = home
         self.approve = approve
-        self.on_status = on_status
         self._server_sock: socket.socket | None = None
 
-    def wait_for_creator(self, timeout: float | None = None, exchange_ssh_keys: bool = False) -> Session:
+    def wait_for_client(self, timeout: float | None = None) -> Session:
         key_path, cert_path = ensure_identity(self.home)
         ctx = _server_context(key_path, cert_path)
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -516,28 +441,26 @@ class JoinListener:
         except Exception as exc:
             raise ConnectionError(f"TLS failed: {exc}") from exc
         _set_keepalive(tls)
-        # Creator identity: its client cert, if presented.
+        # Client identity: its client cert, if presented.
         peer_der = tls.getpeercert(binary_form=True)
         peer_fp = cert_fingerprint(peer_der) if peer_der else ""
-        # Hello carries the creator's device name.
+        # Hello carries the client's device name.
         raw_len = _recv_exact(tls, 4)
         (length,) = struct.unpack(">I", raw_len)
         hello = json.loads(_recv_exact(tls, length).decode())
-        creator_device = str(hello.get("device", "")) or "creator"
-        dialler_host = str(hello.get("host", "")) or _addr[0]
-        if self.approve is not None and not self.approve(creator_device, peer_fp):
+        client_device = str(hello.get("device", "")) or "client"
+        dialled_host = str(hello.get("host", "")) or _addr[0]
+        if self.approve is not None and not self.approve(client_device, peer_fp):
             try:
                 tls.close()
             except Exception:
                 pass
-            raise ConnectionError("joiner denied the session")
+            raise ConnectionError("host denied the session")
         try:
             _send_header(tls, {"type": "hello_ok", "device": self.device})
         except Exception as exc:
             raise ConnectionError(f"hello failed: {exc}") from exc
-        if exchange_ssh_keys:
-            exchange_ssh_keys_server(tls, self.home)
-        session = Session(tls, self.cwd, device=self.device, peer_device=creator_device, peer_host=dialler_host)
+        session = Session(tls, self.cwd, device=self.device, peer_device=client_device, peer_host=dialled_host)
         session.peer_fingerprint = peer_fp
         return session
 
@@ -549,10 +472,10 @@ class JoinListener:
                 pass
 
 
-def create_session(host: str, port: int, cwd: Path, device: str,
+def join_session(host: str, port: int, cwd: Path, device: str,
                    known_fingerprint: str = "", home: Path | None = None,
-                   approve_fingerprint=None, exchange_ssh_keys: bool = False) -> Session:
-    """Creator side: dial the joiner, check its cert fingerprint, return a Session.
+                   approve_fingerprint=None) -> Session:
+    """Client side: dial the host, check its cert fingerprint, return a Session.
 
     approve_fingerprint(fingerprint) -> bool is called when the
     fingerprint is unknown or changed; in the UI it is the Allow button.
@@ -585,14 +508,12 @@ def create_session(host: str, port: int, cwd: Path, device: str,
                 tls.close()
             except Exception:
                 pass
-            raise ConnectionError("creator denied the fingerprint")
+            raise ConnectionError("client denied the fingerprint")
     try:
         _send_header(tls, {"type": "hello", "device": device, "host": host})
         hello_ok = _read_header(tls)
         if hello_ok.get("type") != "hello_ok":
-            raise ConnectionError("joiner did not accept the session")
-        if exchange_ssh_keys:
-            exchange_ssh_keys_client(tls, home)
+            raise ConnectionError("host did not accept the session")
     except Exception:
         try:
             tls.close()

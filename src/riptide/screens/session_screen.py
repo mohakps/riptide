@@ -176,7 +176,7 @@ class SessionScreen(Screen):
     def _format_client_info(self) -> str:
         peer_name = getattr(self.session, "peer_device", "") or ""
         peer_addr = self._get_peer_address()
-        peer_label = "Client" if self.role in ("creator", "host") else "Host"
+        peer_label = "Client" if self.role == "host" else "Host"
         peer_host = getattr(self.session, "peer_host", "") or ""
 
         # Display hostname if connection was made using hostname, else show IP
@@ -332,7 +332,7 @@ class SessionScreen(Screen):
 
     # -- compose ------------------------------------------------------
     def compose(self) -> ComposeResult:
-        banner = BANNER_HOST if self.role in ("creator", "host") else BANNER_CLIENT
+        banner = BANNER_HOST if self.role == "host" else BANNER_CLIENT
         yield VerticalScroll(
             Horizontal(
                 Static(banner, classes="session-header-text", id="session_host_title"),

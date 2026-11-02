@@ -194,8 +194,7 @@ def open_firewall_port(port: int, rule_name: str = "Riptide") -> bool:
     if os_name == "windows":
         try:
             # Single-word rule name: a name with spaces was fragile
-            # in netsh argument parsing. The old "Riptide File
-            # Transfer" name is still tried when enabling, below.
+            # in netsh argument parsing.
             cmd = [
                 "netsh", "advfirewall", "firewall", "add", "rule",
                 f"name={rule_name}",
@@ -210,7 +209,7 @@ def open_firewall_port(port: int, rule_name: str = "Riptide") -> bool:
             # Add fails when a rule with that name already exists,
             # which is exactly the case when the user turned the
             # rule off instead of deleting it. Enable it instead.
-            for name in (rule_name, "Riptide File Transfer"):
+            for name in (rule_name,):
                 res = subprocess.run(
                     [
                         "netsh", "advfirewall", "firewall", "set", "rule",

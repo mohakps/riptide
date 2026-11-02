@@ -7,7 +7,7 @@ from textual.app import App
 from textual.containers import Vertical
 from textual.widgets import ProgressBar, Static
 
-from riptide.screens.create import CreateScreen
+from riptide.screens.join import JoinScreen
 from riptide.screens.session_screen import SessionScreen
 from riptide.theme import CSS
 
@@ -54,14 +54,14 @@ class _SessionApp(App):
         self._session = session
 
     def on_mount(self):
-        self.push_screen(SessionScreen(self._session, "creator"))
+        self.push_screen(SessionScreen(self._session, "host"))
 
 
 class _CreateApp(App):
     CSS = CSS
 
     def on_mount(self):
-        self.push_screen(CreateScreen())
+        self.push_screen(JoinScreen())
 
 
 @pytest.mark.asyncio

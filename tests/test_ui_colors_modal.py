@@ -6,7 +6,7 @@ import pytest
 from textual.app import App
 from textual.widgets import Input, Label, Static
 
-from riptide.screens.create import CreateScreen
+from riptide.screens.join import JoinScreen
 from riptide.screens.session_screen import SessionScreen
 from riptide.theme import CSS
 
@@ -45,7 +45,7 @@ class _SessionApp(App):
         self._session = session
 
     def on_mount(self):
-        self.push_screen(SessionScreen(self._session, "creator"))
+        self.push_screen(SessionScreen(self._session, "host"))
 
 
 class _CreateApp(App):
@@ -84,7 +84,7 @@ async def test_session_colors_download_space_and_metrics(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_fingerprint_modal_overlay():
-    app = _CreateApp(CreateScreen())
+    app = _CreateApp(JoinScreen())
     async with app.run_test(size=(100, 40)) as pilot:
         screen = app.screen
         overlay = screen.query_one("#fingerprint_modal_overlay")

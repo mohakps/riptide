@@ -8,7 +8,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Input
 
 from riptide import __version__
-from riptide.screens.join import JoinScreen
+from riptide.screens.create import CreateScreen
 from riptide.screens.session_screen import SessionScreen
 from riptide.theme import CSS
 
@@ -43,7 +43,7 @@ class _JoinApp(App):
     CSS = CSS
 
     def on_mount(self):
-        self.push_screen(JoinScreen())
+        self.push_screen(CreateScreen())
 
 
 class _SessionApp(App):
@@ -54,11 +54,11 @@ class _SessionApp(App):
         self._session = session
 
     def on_mount(self):
-        self.push_screen(SessionScreen(self._session, "creator"))
+        self.push_screen(SessionScreen(self._session, "host"))
 
 
-def test_version_is_0_13_0():
-    assert __version__ == "0.13.0"
+def test_version_is_0_14_0():
+    assert __version__ == "0.14.0"
 
 
 @pytest.mark.asyncio

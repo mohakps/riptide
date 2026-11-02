@@ -7,12 +7,12 @@
 | Create Server, top | Listens for an incoming connection | You have a public IP, or a working port forward |
 | Join Server, second | Dials out to the other side | You are behind CGNAT, or behind a strict firewall |
 
-From v0.6.0 onward, Create means listener and Join means dialler. Older versions used the names the other way round.
+Create means listener and Join means dialler.
 
 ## First transfer
 
 1. Create side: run `riptide` in the folder you want to receive into. Choose Create Server. Share the public address or DDNS hostname shown on that page, only with the other person. Keep the page open.
-2. Join side: run `riptide` in the folder you want to send from or receive into. Choose Join Server. Enter the creator hostname or IP in the HOSTNAME input, or pick a saved device. Press Enter.
+2. Join side: run `riptide` in the folder you want to send from or receive into. Choose Join Server. Enter the host hostname or IP in the HOSTNAME input, or pick a saved device. Press Enter.
 3. Approve the connection when asked. On a first connection, check the certificate fingerprint if the transfer is sensitive. Compare it with the other person over a separate channel, for example a call or message, before pressing Allow.
 4. Send: in the file manager, select files with Space, press Enter. The batch sends in order, one file at a time.
 5. Request: type a peer path in Download From Peer, press Enter. The peer sees Allow and Deny. On Allow, the file arrives as a normal send. On Deny, nothing is sent.
@@ -41,7 +41,7 @@ A download request name can be absolute on the peer, for example `/home/friend/r
 
 ## Progress
 
-Progress shows for the batch and for the current file: speed, transferred total, remaining size, and ETA, plus a progress bar. Speed is measured from spaced reports, at most every 0.1 seconds, plus the final chunk. This avoids the burst artefact where queued UI callbacks made speed read 4 to 5 times too high in versions before v0.6.0.
+Progress shows for the batch and for the current file: speed, transferred total, remaining size, and ETA, plus a progress bar. Speed is measured from spaced reports, at most every 0.1 seconds, plus the final chunk. This avoids the burst artefact where queued UI callbacks made speed read 4 to 5 times too high.
 
 ## Saved connections
 

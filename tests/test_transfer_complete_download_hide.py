@@ -47,7 +47,7 @@ class _SessionApp(App):
         self._session = session
 
     def on_mount(self):
-        self.push_screen(SessionScreen(self._session, "creator"))
+        self.push_screen(SessionScreen(self._session, "host"))
 
 
 @pytest.mark.asyncio

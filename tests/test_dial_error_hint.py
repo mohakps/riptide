@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from riptide.screens.create import friendly_dial_error
+from riptide.screens.join import friendly_dial_error
 
 
 def test_dial_timeout_hint_names_firewall_and_port():

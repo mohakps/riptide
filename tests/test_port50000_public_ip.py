@@ -5,7 +5,7 @@ from textual.app import App
 from textual.widgets import Static
 
 from riptide.core.config import DEFAULT_SESSION_PORT, load_config, save_config
-from riptide.screens.join import JoinScreen
+from riptide.screens.create import CreateScreen
 from riptide.theme import CSS
 
 
@@ -18,19 +18,21 @@ class _App(App):
         self.push_screen(self._screen)
 
 
-def test_default_port_is_50000_and_legacy_migrates(tmp_path):
+def test_default_port_is_50000_and_custom_port_preserved(tmp_path):
     assert DEFAULT_SESSION_PORT == 50000
     assert load_config(home=tmp_path).session_port == 50000
     (tmp_path / ".riptide").mkdir()
+    # No legacy migration any more: a saved port is kept as-is,
+    # whether it is 49872 or any other custom port.
     (tmp_path / ".riptide" / "config.toml").write_text("session_port = 49872\n")
-    assert load_config(home=tmp_path).session_port == 50000
+    assert load_config(home=tmp_path).session_port == 49872
     (tmp_path / ".riptide" / "config.toml").write_text("session_port = 49999\n")
     assert load_config(home=tmp_path).session_port == 49999
 
 
 @pytest.mark.asyncio
 async def test_create_page_shows_public_ip_widget():
-    app = _App(JoinScreen())
+    app = _App(CreateScreen())
     async with app.run_test(size=(100, 40)) as pilot:
         screen = app.screen
         widget = screen.query_one("#public_ip", Static)

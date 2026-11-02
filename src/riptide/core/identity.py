@@ -63,8 +63,3 @@ def ensure_identity(home: Path | None = None) -> tuple[Path, Path]:
     return key_path, cert_path
 
 
-def fingerprint_of_cert_file(cert_path: Path) -> str:
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
-    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-    return cert_fingerprint(cert.public_bytes(serialization.Encoding.DER))

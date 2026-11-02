@@ -24,7 +24,7 @@ AI-generated code was tested, not trusted blindly. The test suite and headless T
 
 1. Fork the repository, and clone your fork.
 2. Install in a virtual environment with `pip install -e .`, and run tests with `pytest`. Async screen tests need `pytest-asyncio`.
-3. Keep UI names consistent with the v0.6.0 swap: Create means listener, Join means dialler.
+3. Keep UI names consistent: Create means listener, Join means dialler.
 4. Do not store private keys in `config.toml`.
 5. Add or update tests for any behaviour change, and run a headless pilot for any screen change before pushing.
 6. Open a pull request with what changed, what you tested, and what you did not live-test, so the maintainer does not have to guess.

@@ -1,21 +1,11 @@
-"""Join Server screen (dialler), redesigned for clarity, usability, and clean keyboard workflow.
+"""Create Server page: the listener.
 
-NOTE: the class is still called CreateScreen for historical reasons.
-After the name swap, this dial-out page is shown as "Join Server"
-in the UI, and the listener page is shown as "Create Server".
-Functionality is unchanged, only the displayed name swapped.
-
-
-- Omit unnecessary text; highlight important headers and active selection.
-- Saved devices rendered as an unordered list instead of buttons.
-- Default selection: first saved device (index 0).
-- Up/Down arrow keys navigate between saved devices.
-- Grey font color by default (#71717A), red for the focused device (#FF6B6B).
-- Hostname input positioned at 3/4 vertically and centered horizontally.
-- Tab cycles between saved devices and the hostname input field.
-- Enter connects with the selected device / entered hostname.
-- Saved devices are unhighlighted (all grey) whenever the hostname input is focused.
-- Modern docked footer with clear shortcut keys.
+Waits for an incoming connection from the client.
+- Omits unnecessary/redundant text.
+- Prominently highlights the incoming connection request in a dedicated card.
+- Enter key to accept the connection, Backspace to deny.
+- Blocks up/down arrow keys.
+- Buttons (Accept/Deny) are equal sized with green/red backgrounds.
 """
 from __future__ import annotations
 
@@ -23,199 +13,199 @@ import socket
 import threading
 from pathlib import Path
 
-from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
-from ..core.focus import focus_first
-from ..core.session import create_session, parse_host_input
-from ..theme import BANNER_JOIN
-
-
-def friendly_dial_error(exc: Exception, port: int) -> str:
-    """Translate a dial failure into a cause the user can act on.
-
-    A raw WinError 10060 says nothing about why the connection
-    timed out. On a firewall drop, no packet ever reaches the
-    creator, so the creator shows no error at all. The dialler is
-    the only place that can warn, and the usual cause is the
-    creator firewall or router forward for the session port.
-    """
-    text = str(exc)
-    lower = text.lower()
-    if "10060" in text or "timed out" in lower or isinstance(exc, TimeoutError):
-        return (
-            f"Connection timed out (10060). The creator did not answer on port {port}. "
-            f"On the creator PC, check Create Server is open, the firewall rule for port {port} is on, "
-            f"and the router forwards TCP {port} to that PC. "
-            f"Ask the creator to click Create Server again, so Riptide can re-check and open the firewall."
-        )
-    if "10061" in text or "refused" in lower or isinstance(exc, ConnectionRefusedError):
-        return (
-            f"Connection refused. The creator is not listening on port {port}, "
-            f"or Create Server is not open on that PC."
-        )
-    return text
-
-
-class SavedDevicesList(Vertical):
-    """Focusable unordered list of saved peers."""
-
-    can_focus = True
-
-    def __init__(self, peers: list[Peer], **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.peers = peers
-        self.selected_index = 0 if peers else -1
-
-    def compose(self) -> ComposeResult:
-        for i, peer in enumerate(self.peers):
-            text = peer.name if peer.name and peer.name != peer.host else peer.host
-            yield Static(f"• {text}", id=f"device_item_{i}", classes="device-item")
-
-    @property
-    def selected_device(self) -> Peer | None:
-        if 0 <= self.selected_index < len(self.peers):
-            return self.peers[self.selected_index]
-        return None
-
-    def _on_focus(self, event: events.Focus) -> None:
-        super()._on_focus(event)
-        self.refresh_items()
-
-    def _on_blur(self, event: events.Blur) -> None:
-        super()._on_blur(event)
-        self.refresh_items()
-
-    def refresh_items(self) -> None:
-        is_focused = self.has_focus
-        for i, peer in enumerate(self.peers):
-            try:
-                st = self.query_one(f"#device_item_{i}", Static)
-                text = peer.name if peer.name and peer.name != peer.host else peer.host
-                if is_focused and i == self.selected_index:
-                    st.update(f"[bold #FF6B6B]• {text}[/]")
-                else:
-                    st.update(f"[#D7D7D7]• {text}[/]")
-            except Exception:
-                pass
-
-    def move_up(self) -> None:
-        if self.peers and self.selected_index > 0:
-            self.selected_index -= 1
-            self.refresh_items()
-            self._scroll_to_selected()
-
-    def move_down(self) -> None:
-        if self.peers and self.selected_index < len(self.peers) - 1:
-            self.selected_index += 1
-            self.refresh_items()
-            self._scroll_to_selected()
-
-    def _scroll_to_selected(self) -> None:
-        try:
-            item = self.query_one(f"#device_item_{self.selected_index}", Static)
-            item.scroll_visible()
-        except Exception:
-            pass
-
-    def on_click(self, event: events.Click) -> None:
-        self.focus()
-        for i in range(len(self.peers)):
-            try:
-                w = self.query_one(f"#device_item_{i}", Static)
-                if w.region.contains(event.screen_x, event.screen_y):
-                    self.selected_index = i
-                    self.refresh_items()
-                    break
-            except Exception:
-                pass
+from ..core.nat import public_ip
+from ..core.session import HostListener
+from ..theme import BANNER_CREATE
 
 
 class CreateScreen(Screen):
-    def __init__(self) -> None:
+    def __init__(self, port_was_closed: bool = False, firewall_opened: bool = False) -> None:
         super().__init__()
+        self.port_was_closed = port_was_closed
+        self.firewall_opened = firewall_opened
+        # Watchdog state: a failed open is not retried every 20 s,
+        # it is retried only after the port becomes open again and
+        # then closes again. The banner kind tracks whether a
+        # failure banner is currently shown, so it can be cleared
+        # when the port opens again.
+        self._firewall_banner_kind: str | None = (
+            "success" if port_was_closed and firewall_opened
+            else "failed" if port_was_closed
+            else None
+        )
+        self._firewall_watch_failed = port_was_closed and not firewall_opened
         self.cwd = Path.cwd()
         self.config = load_config()
-        self._peers: list[Peer] = [p for p in self.config.peers if p.host]
+        self._pending: tuple[str, str] | None = None
         self._approve_event = threading.Event()
         self._approved = False
         self._awaiting_approval = False
+        self._listener: HostListener | None = None
+        self._stopped = threading.Event()
         self._allow_btn: Button | None = None
         self._deny_btn: Button | None = None
 
     def compose(self) -> ComposeResult:
-        yield Horizontal(
-            Static(BANNER_JOIN, classes="session-header-text", id="session_host_title"),
-            Vertical(
-                Static(f"Port: {self.config.session_port}", id="peer_client_label"),
-                Static("[#E8E8E8]Ready[/] [bold #78DC8C]○[/]", id="peer_status_label"),
-                id="session_peer_info",
-            ),
-            id="session_header_row",
-        )
+        yield Static("", id="router_banner")
+        # Plain Vertical, not VerticalScroll: this page is only a
+        # header and a waiting card, it never needs scrolling, and
+        # the scroll container was showing a vertical scrollbar
+        # even when the terminal was tall enough for the content.
         yield Vertical(
-            Vertical(
-                Static("[bold #E8E8E8]SAVED DEVICES[/]", classes="create-section-title"),
-                SavedDevicesList(self._peers, id="saved_devices")
-                if self._peers
-                else Static("[dim]No saved devices found[/]", id="empty_devices"),
-                id="create_top_section",
+            Horizontal(
+                Static(BANNER_CREATE, classes="session-header-text", id="session_host_title"),
+                Vertical(
+                    Static(f"Port: {self.config.session_port}", id="peer_client_label"),
+                    Static("[#E8E8E8]Listening[/] [bold #FFD166]○[/]", id="peer_status_label"),
+                    id="session_peer_info",
+                ),
+                id="session_header_row",
             ),
             Vertical(
-                Static("HOSTNAME  ·  creator address", classes="composer-label"),
-                Input(placeholder="Creator address: hostname, IPv4, or IPv6", id="host"),
-                Static("Enter the address of the device waiting on Create Server", classes="composer-hint"),
-                id="create_input_section",
+                Static("Your public address: checking…", id="public_ip"),
+                Static(
+                    f"[dim]○[/] [bold #E8E8E8]Waiting for client on port {self.config.session_port}...[/]\n\n"
+                    f"[dim]Share your IP or hostname with the client to initiate connection.[/]",
+                    id="incoming",
+                ),
+                Horizontal(
+                    Button("Accept", id="allow", classes="allow"),
+                    Button("Deny", id="deny", classes="deny"),
+                    id="create_actions",
+                ),
+                id="incoming_card",
             ),
-            Vertical(
-                Static("Status: idle", id="status"),
-                Button("Join Server", id="create", classes="primary"),
-                id="create_bottom_section",
-            ),
-            id="create_body",
+            id="create_content",
         )
         yield Horizontal(
-            Label(r"[bold #E8E8E8]\[↑/↓][/] [dim #FFFFFF]Select[/]", classes="keymap-item keymap-left"),
-            Label(r"[bold #E8E8E8]\[Tab][/] [dim #FFFFFF]Switch[/]", classes="keymap-item"),
-            Label(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Connect / Allow[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Accept[/]", classes="keymap-item keymap-left"),
             Label(r"[bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Deny[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Space][/] [dim #FFFFFF]Select[/]", classes="keymap-item"),
             Label(r"[bold #E8E8E8]\[Esc][/] [dim #FFFFFF]Back[/]", classes="keymap-item keymap-right"),
             id="footer_bar",
         )
-        # Fingerprint approval as a centered popup overlay, like the
-        # download approval request on the session page. The old
-        # inline prompt sat in the bottom section and wrapped out
-        # of the visible area on narrow screens.
-        yield Vertical(
-            Vertical(
-                Static("🔑  FINGERPRINT", id="fingerprint_modal_title"),
-                Static("", id="fingerprint_modal_body"),
-                Horizontal(
-                    Button("Allow", id="allow", classes="allow"),
-                    Button("Deny", id="deny", classes="deny"),
-                    id="fingerprint_modal_actions",
-                ),
-                Static(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Allow[/]    [bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Deny[/]", id="fingerprint_modal_footer"),
-                id="fingerprint_modal_card",
-            ),
-            id="fingerprint_modal_overlay",
-        )
+
+    def _show_router_banner(self) -> None:
+        try:
+            from ..core.firewall import manual_firewall_command, windows_block_rule_exists
+
+            banner = self.query_one("#router_banner", Static)
+            port = self.config.session_port
+            if self.firewall_opened:
+                self._firewall_banner_kind = "success"
+                banner.update(
+                    f"Firewall: port {port} opened automatically. "
+                    f"Please also forward port {port} (TCP) in your router settings."
+                )
+            elif windows_block_rule_exists(port):
+                self._firewall_banner_kind = "failed"
+                banner.update(
+                    f"Firewall: port {port} is blocked by a block rule. "
+                    f"An allow rule alone will not open it. "
+                    f"Remove or disable the block rule for port {port} in Windows Defender Firewall, Advanced Settings, Inbound Rules. "
+                    f"Then also forward port {port} (TCP) in your router settings."
+                )
+            else:
+                self._firewall_banner_kind = "failed"
+                command = manual_firewall_command(port)
+                banner.update(
+                    f"Firewall: port {port} was closed and could not be opened automatically. "
+                    f"Run as administrator, or with sudo: {command} "
+                    f"Then also forward port {port} (TCP) in your router settings."
+                )
+            banner.styles.display = "block"
+        except Exception:
+            pass
+
+    def _set_firewall_banner(self, opened: bool) -> None:
+        self.port_was_closed = True
+        self.firewall_opened = opened
+        self._show_router_banner()
+
+    def _clear_firewall_banner(self) -> None:
+        try:
+            banner = self.query_one("#router_banner", Static)
+            banner.update("")
+            banner.styles.display = "none"
+        except Exception:
+            pass
+        self._firewall_banner_kind = None
+        self.port_was_closed = False
+
+    def _firewall_watch(self) -> None:
+        """Re-check the firewall while Create Server waits.
+
+        The menu check only runs when Create Server is clicked.
+        If the rule is turned off after that, the host hears
+        nothing, because a firewall drop never reaches the app,
+        while the client times out after 30 s. This loop checks
+        every 20 s, tries to open a newly closed port, and warns
+        on the Create page when opening fails.
+        """
+        from ..core.firewall import check_firewall_port, ensure_firewall_port
+
+        while not self._stopped.wait(timeout=20):
+            try:
+                port = self.config.session_port
+                if check_firewall_port(port):
+                    self._firewall_watch_failed = False
+                    if self._firewall_banner_kind == "failed":
+                        try:
+                            self.app.call_from_thread(self._clear_firewall_banner)
+                        except Exception:
+                            pass
+                    continue
+                if self._firewall_watch_failed:
+                    continue
+                _was_open, opened, is_open_now = ensure_firewall_port(port)
+                if is_open_now:
+                    try:
+                        self.app.call_from_thread(self._set_firewall_banner, True)
+                    except Exception:
+                        pass
+                else:
+                    self._firewall_watch_failed = True
+                    try:
+                        self.app.call_from_thread(self._set_firewall_banner, False)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+
+    def _update_public_ip(self, ip: str | None) -> None:
+        try:
+            if ip:
+                self.query_one("#public_ip", Static).update(
+                    f"Your public address: [bold #FF6B6B]{ip}[/]"
+                )
+            else:
+                self.query_one("#public_ip", Static).update(
+                    "[dim]Your public address: could not be determined (check internet)[/]"
+                )
+        except Exception:
+            pass
+
+    def _fetch_public_ip(self) -> None:
+        try:
+            ip = public_ip()
+        except Exception:
+            ip = None
+        try:
+            self.app.call_from_thread(self._update_public_ip, ip)
+        except Exception:
+            pass
 
     def _set_allow_visible(self, visible: bool) -> None:
         try:
-            overlay = self.query_one("#fingerprint_modal_overlay", Vertical)
-            if visible:
-                overlay.add_class("active")
-                overlay.styles.display = "block"
-                if self._allow_btn:
-                    self._allow_btn.focus()
-            else:
-                overlay.remove_class("active")
-                overlay.styles.display = "none"
+            actions = self.query_one("#create_actions", Horizontal)
+            actions.styles.display = "block" if visible else "none"
         except Exception:
             pass
         for btn in (self._allow_btn, self._deny_btn):
@@ -226,136 +216,83 @@ class CreateScreen(Screen):
                     pass
 
     def _set_status(self, text: str) -> None:
+        # Never clobber an active incoming-connection card with a
+        # background status message. A queued worker failure from a
+        # stale listener must not overwrite a decision the user is
+        # looking at.
         try:
-            self.query_one("#status", Static).update(f"Status: {text}")
-            lower = text.lower()
-            if "dial" in lower:
-                self.query_one("#peer_status_label", Static).update("[#E8E8E8]Dialling[/] [bold #FFD166]○[/]")
-            elif "live" in lower or "connected" in lower:
-                self.query_one("#peer_status_label", Static).update("[#E8E8E8]Connected[/] [bold #78DC8C]●[/]")
-            elif "fail" in lower:
-                self.query_one("#peer_status_label", Static).update("[#FF6B6B]Failed[/] [bold #FF6B6B]⊗[/]")
-            else:
-                self.query_one("#peer_status_label", Static).update("[#E8E8E8]Ready[/] [bold #78DC8C]○[/]")
+            card = self.query_one("#incoming_card", Vertical)
+            if "active" in card.classes:
+                return
+        except Exception:
+            pass
+        try:
+            self.query_one("#incoming", Static).update(text)
         except Exception:
             pass
 
-    def _approve(self, fingerprint: str) -> bool:
+    def _show_incoming_connection(self, device: str, fingerprint: str) -> None:
+        try:
+            card = self.query_one("#incoming_card", Vertical)
+            card.add_class("active")
+            fp_text = f"\n[dim]Fingerprint: {fingerprint[:32]}...[/]" if fingerprint else ""
+            msg = (
+                f"[bold #78DC8C]● INCOMING CONNECTION REQUEST[/]\n\n"
+                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}\n\n"
+                f"[#E8E8E8]Accept connection from this peer?[/]"
+            )
+            self.query_one("#incoming", Static).update(msg)
+            self._set_allow_visible(True)
+            if self._allow_btn is not None:
+                self._allow_btn.focus()
+        except Exception:
+            pass
+
+    def _reset_incoming_card(self) -> None:
+        try:
+            card = self.query_one("#incoming_card", Vertical)
+            card.remove_class("active")
+            self._set_allow_visible(False)
+        except Exception:
+            pass
+
+    def _approve(self, device: str, fingerprint: str) -> bool:
+        self._pending = (device, fingerprint)
         self._approved = False
         self._awaiting_approval = True
         self._approve_event.clear()
-        # Show the full fingerprint, split across two lines so it
-        # fits the 60-wide modal card instead of wrapping out of
-        # view. The first line alone is not enough to trust on.
-        first, rest = fingerprint[:32], fingerprint[32:]
-        body = (
-            f"Fingerprint:\n[bold #FFFFFF]{first}\n{rest}[/]\n\n"
-            f"[dim #A1A1AA]Allow to trust this creator?[/]"
-        )
         try:
-            self.app.call_from_thread(
-                self.query_one("#fingerprint_modal_body", Static).update, body
-            )
-            self.app.call_from_thread(self._set_allow_visible, True)
+            self.app.call_from_thread(self._show_incoming_connection, device, fingerprint)
         except Exception:
             pass
-        self._approve_event.wait(timeout=120)
+        self._approve_event.wait(timeout=300)
         self._awaiting_approval = False
         try:
-            self.app.call_from_thread(self.query_one("#fingerprint_modal_body", Static).update, "")
-            self.app.call_from_thread(self._set_allow_visible, False)
+            self.app.call_from_thread(self._reset_incoming_card)
         except Exception:
             pass
         return self._approved
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "host":
-            self._start()
-
     def _handle_button_id(self, bid: str) -> bool:
-        if bid.startswith("peer_"):
-            try:
-                idx = int(bid.split("_", 1)[1])
-                host = self.config.peers[idx].host
-                self.query_one("#host", Input).value = host
-                self._set_status(f"Selected past host: {host}")
-            except Exception:
-                pass
-            return True
-        if bid == "create":
-            self._start()
-            return True
         if bid == "allow":
             self._approved = True
             self._approve_event.set()
-            self._set_allow_visible(False)
+            self._reset_incoming_card()
             return True
         if bid == "deny":
             self._approved = False
             self._approve_event.set()
-            self._set_allow_visible(False)
+            self._reset_incoming_card()
             return True
         if bid == "back":
+            if self._listener is not None:
+                self._listener.stop()
             self.app.pop_screen()
             return True
         return False
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self._handle_button_id(event.button.id or "")
-
-    def _start(self, host_override: str | None = None) -> None:
-        if host_override:
-            text = host_override.strip()
-        elif isinstance(self.focused, SavedDevicesList):
-            dev = self.query_one(SavedDevicesList).selected_device
-            text = dev.host.strip() if dev and dev.host else ""
-        else:
-            try:
-                text = self.query_one("#host", Input).value.strip()
-            except Exception:
-                text = ""
-        if not text and self._peers:
-            try:
-                dev = self.query_one(SavedDevicesList).selected_device
-                text = dev.host.strip() if dev and dev.host else ""
-            except Exception:
-                pass
-        if not text:
-            self._set_status("Failed: enter the creator's address first.")
-            return
-        try:
-            host = parse_host_input(text)
-        except Exception as exc:
-            self._set_status(f"Failed: {exc}")
-            return
-        try:
-            self.query_one("#host", Input).value = host
-        except Exception:
-            pass
-        self._set_status(f"Dialling {host}...")
-        threading.Thread(target=self._worker, args=(host,), daemon=True).start()
-
-    def _worker(self, host: str) -> None:
-        try:
-            known = self.config.peer_for(host)
-            known_fp = known.fingerprint if known else ""
-            session = create_session(
-                host,
-                self.config.session_port,
-                self.cwd,
-                device=socket.gethostname(),
-                known_fingerprint=known_fp,
-                approve_fingerprint=None if known_fp else self._approve,
-            )
-            if known is None and getattr(session, "peer_fingerprint", ""):
-                add_peer(self.config, Peer(name=host, host=host, fingerprint=session.peer_fingerprint))
-            self.app.call_from_thread(self._set_status, "Session live, opening...")
-            from .session_screen import SessionScreen
-            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
-        except Exception as exc:
-            self.app.call_from_thread(
-                self._set_status, f"Failed: {friendly_dial_error(exc, self.config.session_port)}"
-            )
 
     def on_mount(self) -> None:
         try:
@@ -364,86 +301,100 @@ class CreateScreen(Screen):
         except Exception:
             pass
         self._set_allow_visible(False)
-        if self._peers:
-            try:
-                self.query_one(SavedDevicesList).focus()
-            except Exception:
-                focus_first(self)
-        else:
-            try:
-                self.query_one("#host", Input).focus()
-            except Exception:
-                focus_first(self)
+        # Public IP, same timing, so the client has something to dial.
+        threading.Thread(target=self._fetch_public_ip, daemon=True).start()
+        threading.Thread(target=self._worker, daemon=True).start()
+        if self.port_was_closed:
+            self._show_router_banner()
+        # Re-check while waiting, so turning the rule off after
+        # clicking Create Server still warns and tries to open it.
+        threading.Thread(target=self._firewall_watch, daemon=True).start()
 
-    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
-        try:
-            if self._peers:
-                self.query_one(SavedDevicesList).refresh_items()
-        except Exception:
-            pass
+    def on_unmount(self) -> None:
+        # Free the listener port when leaving, otherwise a later
+        # Create Server page in the same process cannot bind it.
+        # Set the flag first, so a worker that has not bound yet
+        # aborts instead of leaking a listener after this screen is gone.
+        self._stopped.set()
+        if self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
 
-    def on_descendant_blur(self, event: events.DescendantBlur) -> None:
+    def _worker(self) -> None:
         try:
-            if self._peers:
-                self.query_one(SavedDevicesList).refresh_items()
-        except Exception:
-            pass
+            self._listener = HostListener(
+                self.config.session_port, self.cwd, device=socket.gethostname(),
+                approve=self._approve,
+            )
+            if self._stopped.is_set():
+                return
+            session = self._listener.wait_for_client()
+            if self._pending is not None:
+                device, fp = self._pending
+                if self.config.peer_for(device) is None:
+                    add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
+            self.app.call_from_thread(self._set_status, "[bold #78DC8C]Connection accepted! Opening session...[/]")
+            from .session_screen import SessionScreen
+            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "host"))
+        except Exception as exc:
+            # Do not overwrite an incoming-connection card that is
+            # already on screen; a worker failure cannot happen while
+            # an approval is pending in the real flow.
+            if self._awaiting_approval:
+                return
+            try:
+                self.app.call_from_thread(self._set_status, f"[bold #FF6B6B]Failed: {exc}[/]")
+            except Exception:
+                pass
 
     async def on_key(self, event) -> None:
         if event.key == "escape":
+            self._stopped.set()
+            if self._listener is not None:
+                self._listener.stop()
             self.app.pop_screen()
             return
-        focused = self.focused
 
-        # Tab cycling between SavedDevicesList and Input
-        if event.key in ("tab", "back_tab", "shift+tab"):
-            if isinstance(focused, Input):
-                if self._peers:
-                    event.stop()
-                    self.query_one(SavedDevicesList).focus()
-                    return
-            elif isinstance(focused, SavedDevicesList):
-                event.stop()
-                self.query_one("#host", Input).focus()
-                return
+        # Up/down arrow keys are blocked
+        if event.key in ("up", "down"):
+            event.stop()
+            return
 
-        # Up/Down navigation between saved devices
-        if event.key == "up":
-            if isinstance(focused, SavedDevicesList):
-                event.stop()
-                focused.move_up()
-                return
-            if isinstance(focused, Input):
-                event.stop()
-                return
-        elif event.key == "down":
-            if isinstance(focused, SavedDevicesList):
-                event.stop()
-                focused.move_down()
-                return
-            if isinstance(focused, Input):
-                event.stop()
-                return
-
-        # Backspace: deny when awaiting approval and host input is not focused
-        if event.key == "backspace" and self._awaiting_approval and not isinstance(focused, Input):
+        # Backspace: deny connection
+        if event.key == "backspace" and self._awaiting_approval:
             event.stop()
             self._handle_button_id("deny")
             return
 
-        # Enter: allow when awaiting approval; else connect with selected device or entered hostname
-        if event.key == "enter":
-            if self._awaiting_approval and not isinstance(focused, Button):
+        # Enter: accept connection
+        if event.key == "enter" and self._awaiting_approval:
+            event.stop()
+            self._handle_button_id("allow")
+            return
+
+        # Space: activate focused button, or accept if awaiting
+        if event.key == "space":
+            focused = self.focused
+            if isinstance(focused, Button):
+                event.stop()
+                self._handle_button_id(focused.id or "")
+                return
+            if self._awaiting_approval:
                 event.stop()
                 self._handle_button_id("allow")
                 return
-            if isinstance(focused, SavedDevicesList):
-                event.stop()
-                dev = focused.selected_device
-                if dev and dev.host:
-                    self._start(dev.host)
-                return
-            if isinstance(focused, Input):
-                event.stop()
-                self._start()
-                return
+
+        # Left / Right / Tab to switch focus between Accept and Deny buttons
+        if event.key in ("left", "right", "tab"):
+            event.stop()
+            if self._awaiting_approval:
+                if self.focused == self._deny_btn and self._allow_btn is not None:
+                    self._allow_btn.focus()
+                elif self._allow_btn is not None and self._deny_btn is not None:
+                    if self.focused == self._allow_btn:
+                        self._deny_btn.focus()
+                    else:
+                        self._allow_btn.focus()
+            return

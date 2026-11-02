@@ -13,9 +13,7 @@ from ..theme import HEADER_BANNER, TAGLINES
 
 class MenuScreen(Screen):
     def compose(self) -> ComposeResult:
-        # Names swapped to match network roles, functionality unchanged:
-        # Create Server listens (old JoinScreen), Join Server dials
-        # (old CreateScreen). Create stays on top.
+        # Create Server listens, Join Server dials. Create stays on top.
         options = [
             Option("❯  Create Server      Wait for incoming session (Requires Port Forwarding)", id="create"),
             Option("   Join Server        Dial out to peer (Required for CGNAT)", id="join"),
@@ -39,9 +37,6 @@ class MenuScreen(Screen):
         from ..core.config import load_config, save_config
         from ..core.firewall import check_firewall_port, open_firewall_port
 
-        # Class names are historical: JoinScreen is the listener,
-        # CreateScreen is the dialler. The menu names are the swapped
-        # ones the user sees.
         opt_id = event.option_id
         if opt_id == "create":
             config = load_config()
@@ -60,10 +55,10 @@ class MenuScreen(Screen):
             save_config(config)
 
             self.app.push_screen(
-                JoinScreen(port_was_closed=not was_open, firewall_opened=opened)
+                CreateScreen(port_was_closed=not was_open, firewall_opened=opened)
             )
         elif opt_id == "join":
-            self.app.push_screen(CreateScreen())
+            self.app.push_screen(JoinScreen())
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         try:

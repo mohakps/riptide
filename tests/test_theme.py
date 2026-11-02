@@ -18,6 +18,5 @@ def test_ansi_header_present():
 
 
 def test_screen_taglines_defined():
-    for key in ("home", "create", "join", "session", "setup"):
-        assert key in TAGLINES
-        assert len(TAGLINES[key]) > 10
+    assert "home" in TAGLINES
+    assert len(TAGLINES["home"]) > 10

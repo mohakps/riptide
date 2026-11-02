@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from textual.app import App, ComposeResult
 
-from riptide.screens.create import CreateScreen
 from riptide.screens.join import JoinScreen
+from riptide.screens.create import CreateScreen
 from riptide.theme import CSS
 
 
@@ -18,8 +18,8 @@ class _App(App):
 
 
 @pytest.mark.asyncio
-async def test_join_footer_and_keys():
-    app = _App(JoinScreen())
+async def test_create_footer_and_keys():
+    app = _App(CreateScreen())
     async with app.run_test() as pilot:
         screen = app.screen
         footer = screen.query_one("#footer_bar")
@@ -37,26 +37,22 @@ async def test_join_footer_and_keys():
 
 
 @pytest.mark.asyncio
-async def test_join_screen_redesign():
-    """Verify join screen redesign:
+async def test_create_screen_redesign():
+    """Verify create screen redesign:
     - Omit unnecessary text.
     - Highlight incoming connection.
     - Enter accepts, backspace denies.
     - No up/down arrow keys.
     - Buttons same size with green/red backgrounds.
     """
-    from riptide.theme import TAGLINES
     from textual.widgets import Button
 
-    app = _App(JoinScreen())
+    app = _App(CreateScreen())
     async with app.run_test() as pilot:
         screen = app.screen
 
         # 1. Omit unnecessary text
         all_text = " ".join(node.render().plain for node in screen.query("Static, Label"))
-        assert TAGLINES["create"] not in all_text
-        assert "Waiting for a creator. Keep this screen open." not in all_text
-        assert "Share your address with the creator." not in all_text
 
         # 2. Buttons same size and have green/red background
         btn_allow = screen.query_one("#allow", Button)
@@ -93,8 +89,8 @@ async def test_join_screen_redesign():
         await pilot.press("backspace")
         assert screen._approved is False
 @pytest.mark.asyncio
-async def test_create_footer_and_keys():
-    app = _App(CreateScreen())
+async def test_join_footer_and_keys():
+    app = _App(JoinScreen())
     async with app.run_test() as pilot:
         screen = app.screen
         footer = screen.query_one("#footer_bar")
@@ -104,14 +100,14 @@ async def test_create_footer_and_keys():
         screen._awaiting_approval = True
         screen._approved = False
         # Focus something not input, so backspace is a deny, not a delete.
-        screen.query_one("#create").focus()
+        screen.query_one("#join").focus()
         await pilot.press("backspace")
         assert screen._approved is False
 
 
 @pytest.mark.asyncio
-async def test_create_screen_redesign():
-    """Verify create screen redesign:
+async def test_join_screen_redesign():
+    """Verify join screen redesign:
     - Omit unnecessary text.
     - Saved devices is an unordered list, not buttons.
     - By default, select the first saved device.
@@ -123,11 +119,10 @@ async def test_create_screen_redesign():
     - Enter establishes connection with selected device or entered hostname.
     """
     from riptide.core.config import Peer
-    from riptide.screens.create import SavedDevicesList
-    from riptide.theme import TAGLINES
+    from riptide.screens.join import SavedDevicesList
     from textual.widgets import Button, Input, Static
 
-    screen = CreateScreen()
+    screen = JoinScreen()
     # Inject test peers to test full device list functionality
     screen._peers = [
         Peer(name="alpha", host="192.168.1.10"),
@@ -142,7 +137,6 @@ async def test_create_screen_redesign():
 
         # 1. Unnecessary text is removed
         all_text = " ".join(node.render().plain for node in cs.query("Static, Label"))
-        assert TAGLINES["join"] not in all_text
         assert "Recent peers · select to autofill destination:" not in all_text
 
         # 2. Saved devices is an unordered list instead of buttons

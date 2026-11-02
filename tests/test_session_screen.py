@@ -9,7 +9,7 @@ from textual.widgets import Button, Input, Label, ListView, ProgressBar, Static
 
 from riptide.core.file_select import format_file_row
 from riptide.screens.session_screen import SessionScreen, _truncate_filename
-from riptide.theme import BANNER_HOST, CSS, TAGLINES
+from riptide.theme import BANNER_HOST, CSS
 
 class DummySession:
     def __init__(self, cwd: Path):
@@ -40,7 +40,7 @@ class DummySession:
 class SessionTestApp(App):
     CSS = CSS
 
-    def __init__(self, session, role="creator"):
+    def __init__(self, session, role="host"):
         super().__init__()
         self.test_session = session
         self.role = role
@@ -55,11 +55,6 @@ def test_file_row_structure(tmp_path):
     assert name == "testfile.dat"
     assert "KB" in size
     assert "-" in mtime and ("am" in mtime or "pm" in mtime)
-
-
-def test_session_tagline_present():
-    assert "session" in TAGLINES
-    assert "encrypted channel" in TAGLINES["session"]
 
 
 def test_truncate_filename():
@@ -78,7 +73,7 @@ async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
     info with IP/host, connection status, and Status subheader removed.
     """
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         assert isinstance(screen, SessionScreen)
@@ -104,7 +99,6 @@ async def test_session_screen_redesign_header_and_sub_header_removed(tmp_path):
 
         # 2. Sub header removed
         all_text = " ".join(str(getattr(node.render(), "plain", node.render())) for node in screen.query("Static, Label"))
-        assert TAGLINES["session"] not in all_text
 
 
 @pytest.mark.asyncio
@@ -116,7 +110,7 @@ async def test_session_screen_file_selector_box_folder_and_separator(tmp_path):
     (tmp_path / "ep01.mkv").write_bytes(b"x" * 1000)
     (tmp_path / "ep02.mkv").write_bytes(b"x" * 2000)
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         browser_box = screen.query_one("#browser_box")
@@ -143,7 +137,7 @@ async def test_session_screen_search_filtering(tmp_path):
     (tmp_path / "naruto_01.mkv").write_bytes(b"x" * 1000)
     (tmp_path / "bleach_02.mkv").write_bytes(b"x" * 1000)
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
 
@@ -171,7 +165,7 @@ async def test_session_screen_spacebar_opens_folder_and_selects_files(tmp_path):
     f1 = tmp_path / "file1.txt"
     f1.write_bytes(b"hello")
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         assert len(screen.query("#send")) == 0
@@ -198,7 +192,7 @@ async def test_session_screen_spacebar_opens_folder_and_selects_files(tmp_path):
 async def test_session_screen_tab_cycles_ui_elements(tmp_path):
     """Tab cycles through UI elements, with no send input anymore."""
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         # Initial focus is cwd_list
@@ -222,7 +216,7 @@ async def test_session_screen_find_label_auto_first_and_zero(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"a")
     (tmp_path / "b.txt").write_bytes(b"b")
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         # Find label, even with empty query.
@@ -255,7 +249,7 @@ async def test_session_screen_download_button_removed_and_disabled_on_send(tmp_p
     f1 = tmp_path / "file1.txt"
     f1.write_bytes(b"data")
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
 
@@ -283,7 +277,7 @@ async def test_session_screen_overall_progress_and_metrics_layout(tmp_path):
     evenly spaced metrics on line 2, third line current file and [sent/total size].
     """
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
 
@@ -329,7 +323,7 @@ async def test_session_screen_focused_item_is_pure_white(tmp_path):
     """Focused/highlighted item must appear pure white (#FFFFFF, bold)."""
     (tmp_path / "item1.txt").write_bytes(b"hello")
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         lv = screen.query_one("#cwd_list", ListView)
@@ -345,7 +339,7 @@ async def test_session_screen_focused_item_is_pure_white(tmp_path):
 async def test_session_screen_download_section_and_zero_gaps(tmp_path):
     """Download section heading and input are present; no ballooning empty gaps."""
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
         dl_composer = screen.query_one("#download_composer")
@@ -363,7 +357,7 @@ async def test_session_screen_download_section_and_zero_gaps(tmp_path):
 async def test_session_screen_scrollable_and_footer_keys_in_brackets(tmp_path):
     """Full page scrollable container and footer items evenly spaced with [] keys."""
     session = DummySession(tmp_path)
-    app = SessionTestApp(session, role="creator")
+    app = SessionTestApp(session, role="host")
     async with app.run_test() as pilot:
         screen = app.screen
 

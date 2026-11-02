@@ -84,34 +84,12 @@ ERROR = "#FF6B6B"
 # and accent coloured, in its own taller header row. This is the
 # same trick as the menu's ANSI Shadow banner, scaled to short
 # page titles so it fits an 80-column terminal.
-_BLOCK_FONT = {
-    'A': [" ███ ", "█   █", "█████", "█   █", "█   █"],
-    'C': [" ████", "█    ", "█    ", "█    ", " ████"],
-    'R': ["████ ", "█   █", "████ ", "█ █  ", "█  █ "],
-    'E': ["█████", "█    ", "████ ", "█    ", "█████"],
-    'T': ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
-    'J': ["  ███", "   █ ", "   █ ", "█  █ ", " ██  "],
-    'O': [" ███ ", "█   █", "█   █", "█   █", " ███ "],
-    'I': ["███", " █ ", " █ ", " █ ", "███"],
-    'N': ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
-    'H': ["█   █", "█   █", "█████", "█   █", "█   █"],
-    'S': [" ████", "█    ", " ███ ", "    █", "████ "],
-    'L': ["█    ", "█    ", "█    ", "█    ", "█████"],
-}
 
 
-def block_banner(text: str) -> str:
-    rows = [""] * 5
-    for ch in text:
-        glyph = _BLOCK_FONT.get(ch, ["     "] * 5)
-        for i, row in enumerate(glyph):
-            rows[i] += row + " "
-    return "\n".join(row.rstrip() for row in rows)
 
 
-# Session roles, after the Create/Join name swap: the creator
-# (listener, Create Server) is the host, the joiner (dialler,
-# Join Server) is the client.
+# Session roles: the Create Server side (listener) is the host,
+# the Join Server side (dialler) is the client.
 BANNER_HOST = r"""   __ ______  __________
   / // / __ \/ __/_  __/
  / _  / /_/ /\ \  / /   
@@ -144,11 +122,6 @@ HEADER_LINES = HEADER_BANNER.splitlines()
 
 TAGLINES = {
     "home": "Direct, encrypted PC-to-PC file transfer · Zero cloud storage, zero intermediate hops",
-    # After the name swap: Create Server listens, Join Server dials.
-    "create": "Listening for peer handshake · Keep this screen open while joiner dials in",
-    "join": "Dial directly to peer · Outbound connection bypasses CGNAT and strict firewalls",
-    "session": "Direct end-to-end encrypted channel · Select local files or drop paths to transfer",
-    "setup": "Configure local SSH daemon and automated UPnP port forwarding for inbound connections",
 }
 
 CSS = """
@@ -567,13 +540,13 @@ ListView:focus > ListItem.--highlight Label {
     margin: 0;
     color: #71717A;
 }
-#join_actions {
+#create_actions {
     width: 100%;
     layout: horizontal;
     padding: 1 0;
     margin: 0;
 }
-#join_actions Button {
+#create_actions Button {
     margin: 0 1;
 }
 
@@ -880,7 +853,7 @@ ProgressBar > .bar--bar {
     padding: 0;
     color: #E8E8E8;
 }
-#join_actions {
+#create_actions {
     width: 100%;
     height: auto;
     layout: horizontal;
@@ -888,7 +861,7 @@ ProgressBar > .bar--bar {
     margin: 1 0 0 0;
     padding: 0;
 }
-#join_actions Button {
+#create_actions Button {
     width: 22;
     min-width: 22;
     height: 3;
@@ -897,15 +870,15 @@ ProgressBar > .bar--bar {
     border: none;
 }
 
-/* Create Server Redesign Styles */
-#create_body {
+/* Join Server Styles */
+#join_body {
     width: 100%;
     height: 1fr;
     layout: vertical;
     padding: 1 2;
     margin: 0;
 }
-#create_top_section {
+#join_top_section {
     width: 100%;
     height: 3fr;
     layout: vertical;
@@ -938,21 +911,21 @@ ProgressBar > .bar--bar {
     height: auto;
     color: #71717A;
 }
-#create_input_section {
+#join_input_section {
     width: 100%;
     height: auto;
     align-horizontal: center;
     margin: 0;
     padding: 0;
 }
-#create_input_section Input {
+#join_input_section Input {
     width: 80;
     max-width: 95%;
     height: 5;
     padding: 1 1;
     margin: 0;
 }
-#create_input_section .composer-label {
+#join_input_section .composer-label {
     width: 80;
     max-width: 95%;
     color: #FF6B6B;
@@ -960,19 +933,19 @@ ProgressBar > .bar--bar {
     text-align: left;
     padding: 0 0 1 0;
 }
-#create_input_section .composer-hint {
+#join_input_section .composer-hint {
     width: 80;
     max-width: 95%;
     color: #71717A;
     padding: 1 0 0 0;
 }
-#create_bottom_section {
+#join_bottom_section {
     width: 100%;
     height: 1fr;
     align-horizontal: center;
     padding: 1 0 0 0;
 }
-#create_bottom_section #status {
+#join_bottom_section #status {
     width: 60;
     max-width: 90%;
     text-align: center;
@@ -1052,7 +1025,7 @@ ProgressBar > .bar--bar {
     color: #71717A;
     margin: 1 0 0 0;
 }
-#create_bottom_section #create {
+#join_bottom_section #create {
     display: none;
 }
 """
