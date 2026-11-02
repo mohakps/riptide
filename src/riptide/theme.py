@@ -320,18 +320,6 @@ OptionList > .option-list--option-highlighted {
     color: #FF6B6B;
     text-style: bold;
 }
-#menu_list {
-    width: 100%;
-    max-width: 86;
-    height: auto;
-    border: round #3F3F46;
-    background: transparent;
-    padding: 0 1;
-    margin: 1 0;
-}
-#menu_list:focus {
-    border: round #FF6B6B;
-}
 ListView {
     background: transparent;
     border: round #3F3F46;

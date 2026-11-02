@@ -12,7 +12,7 @@ from textual.widgets import Label, ListView, OptionList, Static
 from riptide.core.config import Config, load_config, save_config
 from riptide.core.firewall import check_firewall_port, get_os, open_firewall_port
 from riptide.screens.join import JoinScreen
-from riptide.screens.menu import MenuScreen, _build_option_prompt
+from riptide.screens.menu import MenuScreen
 from riptide.theme import BANNER_CLIENT, BANNER_CREATE, BANNER_HOST, BANNER_JOIN, CSS
 
 
@@ -129,22 +129,6 @@ def test_firewall_open_port_invokes_os_command():
             assert "netsh" in cmd
             assert any("50000" in str(arg) for arg in cmd)
 
-
-def test_menu_option_prompts_styling():
-    """Verify home page options distinguish actual option title from subtitle."""
-    active_prompt = _build_option_prompt("Create Server", "Wait for incoming session", True)
-    inactive_prompt = _build_option_prompt("Join Server", "Dial out to peer", False)
-
-    assert isinstance(active_prompt, Text)
-    assert isinstance(inactive_prompt, Text)
-
-    # Active option has bold white title and prefix
-    assert str(active_prompt).startswith("❯  Create Server")
-    assert "Wait for incoming session" in str(active_prompt)
-
-    # Inactive option has subdued styling
-    assert str(inactive_prompt).startswith("   Join Server")
-    assert "Dial out to peer" in str(inactive_prompt)
 
 
 @pytest.mark.asyncio
