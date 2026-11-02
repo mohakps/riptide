@@ -697,6 +697,15 @@ ProgressBar > .bar--bar {
     width: 100% !important;
     background: #FF6B6B;
 }
+#transfer_complete_message {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: #78DC8C;
+    text-style: bold;
+    margin: 1 0;
+    display: none;
+}
 #progress_metrics_row {
     width: 100%;
     height: 1;

@@ -97,6 +97,8 @@ class SessionScreen(Screen):
         self._pending_downloads: list[tuple[str, str]] = []
         self._approve_btn: Button | None = None
         self._deny_btn: Button | None = None
+        self._transfer_active: bool = False
+        self._progress_visible: bool = False
 
     # -- header & connection display ----------------------------------
     def _get_peer_address(self) -> str:
@@ -291,6 +293,7 @@ class SessionScreen(Screen):
                     Label("", id="progress_file_size"),
                     id="progress_file_row",
                 ),
+                Static("", id="transfer_complete_message"),
                 id="progress_section",
             ),
             id="session_scroll",
@@ -375,9 +378,60 @@ class SessionScreen(Screen):
                 except Exception:
                     pass
 
-    def _set_progress_visible(self, visible: bool) -> None:
+    def _update_download_composer(self) -> None:
+        # Download composer is hidden completely while any file is
+        # selected to send, or while a transfer is in progress
+        # (progress bar visible, sending or receiving). It returns
+        # when neither applies.
+        hidden = bool(self.selection) or self._transfer_active or self._progress_visible
         try:
-            self.query_one("#progress_section", Vertical).styles.display = "block" if visible else "none"
+            dl_input = self.query_one("#download_input", Input)
+            dl_input.disabled = hidden
+            dl_composer = self.query_one("#download_composer", Vertical)
+            if hidden:
+                dl_composer.add_class("disabled")
+                dl_composer.styles.display = "none"
+                if self.focused == dl_input:
+                    self.query_one("#cwd_list", ListView).focus()
+            else:
+                dl_composer.remove_class("disabled")
+                dl_composer.styles.display = "block"
+        except Exception:
+            pass
+
+    def _set_progress_visible(self, visible: bool) -> None:
+        self._progress_visible = visible
+        try:
+            section = self.query_one("#progress_section", Vertical)
+            section.styles.display = "block" if visible else "none"
+            if visible:
+                # A new transfer replaces any previous completion message.
+                self.query_one("#transfer_complete_message", Static).styles.display = "none"
+                self.query_one("#bar", ProgressBar).styles.display = "block"
+                self.query_one("#progress_metrics_row", Horizontal).styles.display = "block"
+                self.query_one("#progress_file_row", Horizontal).styles.display = "block"
+        except Exception:
+            pass
+        self._update_download_composer()
+
+    def _show_transfer_complete(self, sent_count: int, failed_count: int = 0) -> None:
+        # In place of the progress bar, at the bottom of the page:
+        # the progress section stays visible, but the bar, metrics
+        # and file row are hidden and only the green statement shows.
+        try:
+            section = self.query_one("#progress_section", Vertical)
+            section.styles.display = "block"
+            self.query_one("#bar", ProgressBar).styles.display = "none"
+            self.query_one("#progress_metrics_row", Horizontal).styles.display = "none"
+            self.query_one("#progress_file_row", Horizontal).styles.display = "none"
+            noun = "file" if sent_count == 1 else "files"
+            text = f"Sent {sent_count} {noun} successfully."
+            if failed_count:
+                failed_noun = "file" if failed_count == 1 else "files"
+                text = f"Sent {sent_count} {noun} successfully, {failed_count} {failed_noun} failed."
+            msg = self.query_one("#transfer_complete_message", Static)
+            msg.update(text)
+            msg.styles.display = "block"
         except Exception:
             pass
     def _show_next_download_approval(self) -> None:
@@ -491,22 +545,9 @@ class SessionScreen(Screen):
             pass
 
         # Requirement 6: download input cannot be accessed when 'send' files are selected.
-        # It is hidden completely, not just dimmed, while any file is selected.
-        is_sending = bool(self.selection)
-        try:
-            dl_input = self.query_one("#download_input", Input)
-            dl_input.disabled = is_sending
-            dl_composer = self.query_one("#download_composer", Vertical)
-            if is_sending:
-                dl_composer.add_class("disabled")
-                dl_composer.styles.display = "none"
-                if self.focused == dl_input:
-                    self.query_one("#cwd_list", ListView).focus()
-            else:
-                dl_composer.remove_class("disabled")
-                dl_composer.styles.display = "block"
-        except Exception:
-            pass
+        # It is hidden completely, not just dimmed, while any file is selected,
+        # and also while a transfer is in progress (see _update_download_composer).
+        self._update_download_composer()
 
     # -- input handling ------------------------------------------------
     # The send file input field was removed: files are now selected
@@ -565,6 +606,9 @@ class SessionScreen(Screen):
             return
         files = list(self.selection)
         self.selection = []
+        # Set transfer-active before refreshing, so the download
+        # composer stays hidden even though the selection is now empty.
+        self._transfer_active = True
         self._refresh_selected()
         self._refresh_browser()
 
@@ -575,6 +619,8 @@ class SessionScreen(Screen):
         def worker():
             self.app.call_from_thread(self._set_progress_visible, True)
             completed_bytes = 0
+            sent_count = 0
+            failed_count = 0
             for path in files:
                 file_size = path.stat().st_size if path.is_file() else 0
                 self.app.call_from_thread(self._set_status, f"Sending {path.name}...")
@@ -587,13 +633,23 @@ class SessionScreen(Screen):
 
                 ok = self.session.send_file(path, on_progress=on_file_prog)
                 completed_bytes += file_size
+                if ok:
+                    sent_count += 1
+                else:
+                    failed_count += 1
                 self.app.call_from_thread(
                     self._set_status,
                     f"Sent {path.name}" if ok else f"Failed to send {path.name}",
                 )
-            self.app.call_from_thread(self._set_progress_visible, False)
+            self.app.call_from_thread(self._finish_send, sent_count, failed_count)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_send(self, sent_count: int, failed_count: int) -> None:
+        self._transfer_active = False
+        self._progress_visible = False
+        self._show_transfer_complete(sent_count, failed_count)
+        self._update_download_composer()
     def _download(self, name: str) -> None:
         self._clear_download_denied()
         if self.selection:
