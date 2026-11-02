@@ -213,6 +213,17 @@ class JoinScreen(Screen):
                 overlay.styles.display = "none"
         except Exception:
             pass
+        try:
+            footer = self.query_one("#footer_bar")
+            footer.styles.display = "none" if visible else "block"
+        except Exception:
+            pass
+        try:
+            self.show_vertical_scrollbar = not visible
+            self.styles.overflow_y = "hidden" if visible else "auto"
+        except Exception:
+            pass
+        
         for btn in (self._allow_btn, self._deny_btn):
             if btn is not None:
                 try:

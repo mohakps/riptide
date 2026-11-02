@@ -763,7 +763,7 @@ ProgressBar > .bar--bar {
     width: 60;
     max-width: 90%;
     height: auto;
-    border: round #FF6B6B;
+    border: none;
     /* Popup inside is dark grey, #3F3F46, so the card still
        stands out against the blank background outside it,
        with its red border. */
@@ -987,7 +987,7 @@ ProgressBar > .bar--bar {
     width: 60;
     max-width: 90%;
     height: auto;
-    border: round #FF6B6B;
+    border: none;
     /* Same dark grey as the download card, standing out against
        the blank background outside it. */
     background: #3F3F46;

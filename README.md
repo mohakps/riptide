@@ -22,12 +22,12 @@ The name comes from Minecraft. Riptide is the trident enchantment that launches 
 - File manager with folders, live search in `Find:`, auto-highlight of the first file or folder, and `0` to deselect all.
 - File requests with approval. Type a peer path, press Enter, and nothing is sent until the peer presses Allow.
 - Saved connections. Peers, hostnames, and certificate fingerprints are saved in `~/.riptide/config.toml`. Saved devices appear on the Join Server page.
+- Automatically add firewall rule for inbound connections.
 - Live progress with speed, transferred total, remaining size, and ETA, on sender and receiver.
 - Hash verification. Each file is SHA-256 hashed before sending, written as `.part` on receipt, and renamed only if the hash matches.
 - TLS encryption for headers and file bytes, with per-machine self-signed certificates.
 - Fingerprint approval. First connection to a peer shows its certificate fingerprint for approval. A changed fingerprint later aborts the session.
 - Public address display on Create Server.
-- Dark grey terminal UI with a soft red accent, for Windows and Linux.
 
 Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [Docs/Security](docs/security.md).
 
@@ -142,6 +142,11 @@ For detail structure, read [Docs/Project structure](docs/project-structure.md).
 - Gemini 3.8 Flash: TUI Design
 
 Human decisions, testing on real machines, and final choices about names, ports, and behaviour are the author's. AI-generated code was tested, not trusted blindly. The test suite and headless Textual pilots are part of the workflow, and live two-machine testing is what proves a transfer.
+
+## Future Scope
+
+- Support for transferring folders
+- Support for MacOS
 
 ## Docs
 
