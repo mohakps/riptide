@@ -182,7 +182,12 @@ async def test_session_screen_spacebar_opens_folder_and_selects_files(tmp_path):
         await pilot.pause()
         selected_items = screen.query(".selected-file-item")
         assert len(selected_items) == 1
-        assert str(f1.resolve()) in selected_items[0].render().plain
+        # The absolute path is longer than the default 80-column
+        # test window, so it is truncated with ..., keeping the
+        # start and the file name at the end.
+        plain = selected_items[0].render().plain
+        assert "..." in plain
+        assert plain.endswith("file1.txt  (5 B)")
 
         # Space on a folder navigates into it
         screen._go_into(sub)

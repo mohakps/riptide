@@ -44,8 +44,10 @@ from ..core.transfer import TransferProgress, format_bytes as fmt_bytes, format_
 from ..theme import BANNER_CLIENT, BANNER_HOST
 
 
-def _build_file_item(path: Path, selected: bool, is_focused: bool = False) -> ListItem:
+def _build_file_item(path: Path, selected: bool, is_focused: bool = False, max_name_chars: int | None = None) -> ListItem:
     display, size, mtime = format_browser_row(path)
+    if max_name_chars is not None:
+        display = _truncate_filename(display, max_name_chars)
     item = ListItem(
         Horizontal(
             Label("❯ " if is_focused else "  ", classes="file-pointer"),
@@ -68,6 +70,20 @@ def _truncate_filename(name: str, max_chars: int = 50) -> str:
     prefix_len = (max_chars - 3) * 2 // 3
     suffix_len = (max_chars - 3) - prefix_len
     return f"{name[:prefix_len]}...{name[-suffix_len:]}"
+
+
+def _strip_surrounding_quotes(text: str) -> str:
+    """Strip double quotes at the start and end of a pasted path.
+
+    Terminals and file managers often paste a path as
+    "C:\\Users\\...\\file.pdf" or "/home/user/file.pdf", quotes
+    included. A path with those quotes would not be found, so
+    remove paired quotes, and also a lone leading or trailing
+    quote, then any surrounding whitespace again."""
+    text = text.strip()
+    while len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        text = text[1:-1].strip()
+    return text.strip('"').strip()
 
 def is_ip_address(text: str) -> bool:
     if not text:
@@ -146,6 +162,28 @@ class SessionScreen(Screen):
         except Exception:
             pass
 
+    def _screen_width(self) -> int:
+        # Full terminal width. Screen padding is 1 2, so content
+        # width is screen width minus 4. Fall back to 80 when the
+        # screen is not mounted yet, for example in unit tests
+        # that call helpers before mounting.
+        try:
+            width = self.size.width
+            if width:
+                return int(width)
+        except Exception:
+            pass
+        try:
+            width = self.app.screen.size.width
+            if width:
+                return int(width)
+        except Exception:
+            pass
+        return 80
+
+    def _content_width(self) -> int:
+        return max(20, self._screen_width() - 4)
+
     # -- file manager -------------------------------------------------
     def _browser_rows(self) -> list[Path]:
         all_entries = list_browser_entries(self.browser_dir)
@@ -184,6 +222,12 @@ class SessionScreen(Screen):
                 index = 0
         lst.clear()
         resolved_idx = max(0, min(index, len(rows) - 1)) if (rows and index is not None) else 0
+        # File row: pointer 2 + name 1fr + size 12 + mtime 22, inside
+        # the browser box (border 2 + padding 2). If the name is
+        # left at full length, the 1fr column collapses to 0 on a
+        # narrow window and the name is hidden completely. Truncate
+        # it to the width that is actually available, with ... .
+        name_max = max(12, self._content_width() - 4 - 36)
         for idx, path in enumerate(rows):
             is_parent = path == self.browser_dir.parent and path not in list_browser_entries(self.browser_dir)
             is_focused = (idx == resolved_idx)
@@ -201,7 +245,7 @@ class SessionScreen(Screen):
                 item._riptide_parent = True  # type: ignore[attr-defined]
                 lst.append(item)
             else:
-                lst.append(_build_file_item(path, path in selected, is_focused=is_focused))
+                lst.append(_build_file_item(path, path in selected, is_focused=is_focused, max_name_chars=name_max))
         try:
             if rows and index is not None:
                 lst.index = max(0, min(index, len(rows) - 1))
@@ -211,7 +255,13 @@ class SessionScreen(Screen):
 
     def _update_folder_header(self) -> None:
         try:
-            self.query_one("#browser_path", Static).update(f"📁 {self.browser_dir}")
+            # Reserve room for the Find label at the right end, so
+            # a long folder path is truncated with ... instead of
+            # pushing the Find label off, or collapsing to nothing.
+            find_width = len(f"Find: {self._search_query}▌") + 1
+            path_max = max(12, self._content_width() - find_width - 3)
+            trunc_dir = _truncate_filename(str(self.browser_dir), path_max)
+            self.query_one("#browser_path", Static).update(f"📁 {trunc_dir}")
             # Find label is always visible at the right corner of the
             # file-selection box header, with the typed text in white
             # and a blinking cursor, even when the query is empty.
@@ -488,11 +538,18 @@ class SessionScreen(Screen):
             self.query_one("#bar", ProgressBar).styles.display = "none"
             self.query_one("#progress_metrics_row", Horizontal).styles.display = "none"
             self.query_one("#progress_file_row", Horizontal).styles.display = "none"
+            content_width = self._content_width()
             if len(self._received_files) == 1:
-                text = f'Received file "{self._received_files[0]}" successfully.'
+                # 'Received file "' + '" successfully.' = 30 chars
+                # around the name, so the name itself must fit in
+                # the rest, with ... if it does not.
+                trunc_name = _truncate_filename(self._received_files[0], max(12, content_width - 30))
+                text = f'Received file "{trunc_name}" successfully.'
             else:
                 lines = [f"Received {len(self._received_files)} files:"]
-                lines.extend(f"• {name}" for name in self._received_files)
+                for name in self._received_files:
+                    trunc_name = _truncate_filename(name, max(12, content_width - 2))
+                    lines.append(f"• {trunc_name}")
                 text = "\n".join(lines)
             msg = self.query_one("#transfer_complete_message", Static)
             msg.update(text)
@@ -511,8 +568,12 @@ class SessionScreen(Screen):
             return
         name, _rid = self._pending_downloads[0]
         try:
+            # Modal card is 60 wide with padding 1 2, so its content
+            # is 56 wide, or less on a window narrower than the card.
+            card_content = max(12, min(56, self._screen_width() - 8))
+            trunc_name = _truncate_filename(name, card_content)
             self.query_one("#download_approval", Static).update(
-                f"Peer wants to download:\n[bold #FFFFFF]{name}[/]\n\n"
+                f"Peer wants to download:\n[bold #FFFFFF]{trunc_name}[/]\n\n"
                 f"[dim #A1A1AA]Allow to send it, Deny to refuse.[/]"
             )
         except Exception:
@@ -619,11 +680,16 @@ class SessionScreen(Screen):
             self.query_one("#metric_remaining", Label).update(f"Remaining: {remaining}")
             self.query_one("#metric_eta", Label).update(f"ETA: {eta}")
 
-            trunc_name = _truncate_filename(name, 50)
-            self.query_one("#progress_file_name", Label).update(f"{direction}: {trunc_name}")
-            self.query_one("#progress_file_size", Label).update(
-                f"[{format_bytes(file_sent)} / {format_bytes(file_total)}]"
-            )
+            size_text = f"[{format_bytes(file_sent)} / {format_bytes(file_total)}]"
+            # Dynamic, not a fixed 50: the name label is 1fr and
+            # the size label is auto, so the name must fit in
+            # content width minus the size label, or it is clipped
+            # or, on a narrow window, collapses to nothing.
+            prefix = f"{direction}: "
+            name_max = max(12, self._content_width() - len(prefix) - len(size_text))
+            trunc_name = _truncate_filename(name, name_max)
+            self.query_one("#progress_file_name", Label).update(f"{prefix}{trunc_name}")
+            self.query_one("#progress_file_size", Label).update(size_text)
         except Exception:
             pass
 
@@ -644,8 +710,14 @@ class SessionScreen(Screen):
             for p in self.selection:
                 size_str = format_bytes(p.stat().st_size) if p.is_file() else ""
                 dim_size = f"  [dim #FFFFFF]({size_str})[/]" if size_str else ""
+                # Full absolute paths are the longest strings on the
+                # page. Truncate them to the width available, with
+                # ..., keeping the start and the file name at the end.
+                size_plain_len = len(size_str) + 4 if size_str else 0
+                path_max = max(12, self._content_width() - 2 - size_plain_len)
+                trunc_path = _truncate_filename(str(p.resolve()), path_max)
                 selected_container.mount(
-                    Static(f"[bold #FF6B6B]• {p.resolve()}[/]{dim_size}", classes="selected-file-item")
+                    Static(f"[bold #FF6B6B]• {trunc_path}[/]{dim_size}", classes="selected-file-item")
                 )
         except Exception:
             pass
@@ -663,7 +735,7 @@ class SessionScreen(Screen):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "download_input":
             # Requirement 6: Enter key initiates the request
-            name = event.value.strip()
+            name = _strip_surrounding_quotes(event.value)
             event.input.value = ""
             if name:
                 self._download(name)
@@ -759,6 +831,7 @@ class SessionScreen(Screen):
         self._show_transfer_complete(sent_count, failed_count)
         self._update_download_composer()
     def _download(self, name: str) -> None:
+        name = _strip_surrounding_quotes(name)
         self._clear_download_denied()
         if self.selection:
             self._set_status("Cannot download while files are selected to send. Send or unselect them first.")
@@ -773,7 +846,9 @@ class SessionScreen(Screen):
         self._set_status(f"Peer denied download of {name}")
         try:
             msg = self.query_one("#download_denied_message", Static)
-            msg.update(f"✗ Peer denied download request for {name}")
+            # "✗ Peer denied download request for " is 36 chars.
+            trunc_name = _truncate_filename(name, max(12, self._content_width() - 36))
+            msg.update(f"✗ Peer denied download request for {trunc_name}")
             msg.add_class("active")
             msg.styles.display = "block"
         except Exception:

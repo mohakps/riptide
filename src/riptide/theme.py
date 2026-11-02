@@ -349,6 +349,7 @@ ListItem.--highlight {
    The -highlight rules come last so hover/focus wins over selected. */
 .file-name {
     width: 1fr;
+    min-width: 12;
     color: #E0E0E0;
 }
 ListItem.selected .file-name {
@@ -737,6 +738,7 @@ ProgressBar > .bar--bar {
 }
 #progress_file_name {
     width: 1fr;
+    min-width: 12;
     height: 1;
     color: #E8E8E8;
     text-style: bold;
@@ -770,9 +772,13 @@ ProgressBar > .bar--bar {
 }
 #download_modal_card {
     width: 60;
+    max-width: 90%;
     height: auto;
     border: round #FF6B6B;
-    background: #18181B;
+    /* Popup inside is dark grey too, not near-black. #3F3F46 is a
+       lighter dark grey than the #27272A overlay, so the card still
+       stands out against it, with its red border. */
+    background: #3F3F46;
     padding: 1 2;
     align: center middle;
 }
@@ -989,9 +995,11 @@ ProgressBar > .bar--bar {
 }
 #fingerprint_modal_card {
     width: 60;
+    max-width: 90%;
     height: auto;
     border: round #FF6B6B;
-    background: #18181B;
+    /* Same dark grey as the download card, lighter than the overlay. */
+    background: #3F3F46;
     padding: 1 2;
     align: center middle;
 }
