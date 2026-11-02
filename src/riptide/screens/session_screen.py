@@ -62,14 +62,56 @@ def _build_file_item(path: Path, selected: bool, is_focused: bool = False, max_n
     return item
 
 
+def _cell_len(text: str) -> int:
+    # Terminal cell width, not character count. 📁 is 1 character
+    # but 2 cells wide, which is exactly why folder names broke:
+    # a folder display truncated to 32 characters was 33 cells
+    # wide, wrapped to a second line, and the 1-line file row
+    # clipped that line. Rich is already a Textual dependency.
+    try:
+        from rich.cells import cell_len
+
+        return cell_len(text)
+    except Exception:
+        return len(text)
+
+
+def _take_cells(text: str, max_cells: int, from_end: bool = False) -> str:
+    # Take characters whose total cell width fits in max_cells,
+    # without splitting a wide character in half.
+    if not from_end:
+        out: list[str] = []
+        used = 0
+        for ch in text:
+            width = _cell_len(ch)
+            if used + width > max_cells:
+                break
+            out.append(ch)
+            used += width
+        return "".join(out)
+    out_rev: list[str] = []
+    used = 0
+    for ch in reversed(text):
+        width = _cell_len(ch)
+        if used + width > max_cells:
+            break
+        out_rev.append(ch)
+        used += width
+    return "".join(reversed(out_rev))
+
+
 def _truncate_filename(name: str, max_chars: int = 50) -> str:
-    if len(name) <= max_chars:
+    # max_chars is really max terminal cells, not characters.
+    # Every caller passes a column width in cells, so a wide
+    # character such as 📁 must count as 2, or the truncated
+    # name still overflows its column and wraps or clips.
+    if _cell_len(name) <= max_chars:
         return name
     if max_chars <= 6:
-        return name[:max_chars]
-    prefix_len = (max_chars - 3) * 2 // 3
-    suffix_len = (max_chars - 3) - prefix_len
-    return f"{name[:prefix_len]}...{name[-suffix_len:]}"
+        return _take_cells(name, max_chars)
+    prefix_cells = (max_chars - 3) * 2 // 3
+    suffix_cells = (max_chars - 3) - prefix_cells
+    return f"{_take_cells(name, prefix_cells)}...{_take_cells(name, suffix_cells, from_end=True)}"
 
 
 def _strip_surrounding_quotes(text: str) -> str:
