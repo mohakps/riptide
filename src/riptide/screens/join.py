@@ -19,7 +19,7 @@ import threading
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Label, Static
 
@@ -58,7 +58,11 @@ class JoinScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="router_banner")
-        yield VerticalScroll(
+        # Plain Vertical, not VerticalScroll: this page is only a
+        # header and a waiting card, it never needs scrolling, and
+        # the scroll container was showing a vertical scrollbar
+        # even when the terminal was tall enough for the content.
+        yield Vertical(
             Horizontal(
                 Static(BANNER_CREATE, classes="session-header-text", id="session_host_title"),
                 Vertical(
@@ -82,8 +86,7 @@ class JoinScreen(Screen):
                 ),
                 id="incoming_card",
             ),
-            id="session_scroll",
-            can_focus=False,
+            id="create_content",
         )
         yield Horizontal(
             Label(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Accept[/]", classes="keymap-item keymap-left"),

@@ -437,6 +437,14 @@ ListView:focus > ListItem.--highlight Label {
     padding: 0;
     margin: 0;
 }
+/* Create Server page: plain container, no scroll container, so
+   no vertical scrollbar can appear on this page. */
+#create_content {
+    height: 1fr;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+}
 #session_header_row {
     width: 100%;
     height: 5;

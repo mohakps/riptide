@@ -490,7 +490,8 @@ class SessionScreen(Screen):
         except Exception:
             pass
 
-        # Requirement 6: download input cannot be accessed when 'send' files are selected
+        # Requirement 6: download input cannot be accessed when 'send' files are selected.
+        # It is hidden completely, not just dimmed, while any file is selected.
         is_sending = bool(self.selection)
         try:
             dl_input = self.query_one("#download_input", Input)
@@ -498,10 +499,12 @@ class SessionScreen(Screen):
             dl_composer = self.query_one("#download_composer", Vertical)
             if is_sending:
                 dl_composer.add_class("disabled")
+                dl_composer.styles.display = "none"
                 if self.focused == dl_input:
                     self.query_one("#cwd_list", ListView).focus()
             else:
                 dl_composer.remove_class("disabled")
+                dl_composer.styles.display = "block"
         except Exception:
             pass
 
