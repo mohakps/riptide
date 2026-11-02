@@ -146,7 +146,7 @@ async def test_menu_clicking_create_server_firewall_flow(tmp_path: Path):
     app = _MenuTestApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         with patch(
-            "riptide.core.firewall.ensure_firewall_port", return_value=(False, True, True)
+            "riptide.core.firewall.ensure_firewall_port_with_elevation", return_value=(False, True, True, False)
         ) as mock_ensure:
             async with app.run_test() as pilot:
                 opt_list = app.screen.query_one("#menu_list", OptionList)
@@ -166,7 +166,7 @@ async def test_menu_clicking_create_server_firewall_failed(tmp_path: Path):
     app = _MenuTestApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         with patch(
-            "riptide.core.firewall.ensure_firewall_port", return_value=(False, False, False)
+            "riptide.core.firewall.ensure_firewall_port_with_elevation", return_value=(False, False, False, False)
         ):
             async with app.run_test() as pilot:
                 opt_list = app.screen.query_one("#menu_list", OptionList)

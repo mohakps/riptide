@@ -35,7 +35,6 @@ class MenuScreen(Screen):
         from .create import CreateScreen
         from .join import JoinScreen
         from ..core.config import load_config, save_config
-        from ..core.firewall import check_firewall_port, open_firewall_port
 
         opt_id = event.option_id
         if opt_id == "create":
@@ -43,19 +42,25 @@ class MenuScreen(Screen):
             port = config.session_port
             # On clicking Create Server, check the OS firewall for the
             # session port and open it automatically if it is closed.
-            # ensure_firewall_port uses sudo -n on Linux, so it fails
-            # fast instead of hanging on a password prompt when the
-            # user cannot open the firewall automatically. The Create
-            # page then reports opened or failed, with the manual
-            # command when opening failed.
-            from ..core.firewall import ensure_firewall_port
+            # This is the only place that may prompt for elevation:
+            # UAC on Windows, pkexec on Linux. The plain open runs
+            # first (admin on Windows, passwordless sudo on Linux),
+            # so no prompt appears when it is not needed. The
+            # 20 second watch loop on the Create page never prompts.
+            # The Create page then reports opened, cancelled, or
+            # failed, with the manual command when opening failed.
+            from ..core.firewall import ensure_firewall_port_with_elevation
 
-            was_open, opened, is_open_now = ensure_firewall_port(port)
+            was_open, opened, is_open_now, cancelled = ensure_firewall_port_with_elevation(port)
             config.firewall_port_open = is_open_now
             save_config(config)
 
             self.app.push_screen(
-                CreateScreen(port_was_closed=not was_open, firewall_opened=opened)
+                CreateScreen(
+                    port_was_closed=not was_open,
+                    firewall_opened=opened,
+                    firewall_cancelled=cancelled,
+                )
             )
         elif opt_id == "join":
             self.app.push_screen(JoinScreen())

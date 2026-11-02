@@ -44,7 +44,7 @@ riptide/
 - `src/riptide/core/nat.py`: STUN public IP and HTTPS public IP fallback, shown on the Create Server page.
 - `src/riptide/core/config.py`: Saved peers, session port, and config file handling in `~/.riptide/config.toml`. A peer is name, host, and certificate fingerprint.
 - `src/riptide/core/file_select.py`: Folder listing, folder-first order, folder formatting, and selection helpers.
-- `src/riptide/core/firewall.py`: OS firewall check and automatic open for the session port, plus the manual command for the Create page banner.
+- `src/riptide/core/firewall.py`: OS firewall check and automatic open for the session port, plus the manual command for the Create page banner. Elevation on the Create click only: UAC for netsh on Windows, pkexec for the firewall command on Linux, with a cancelled result for the Create page banner. Only the port 50000 rule is checked and opened.
 - `src/riptide/core/focus.py`: Arrow-key focus navigation helpers.
 - `src/riptide/core/transfer.py`: Transfer progress, speed EMA, remaining size, ETA, and byte formatting.
 

@@ -25,10 +25,11 @@ from ..theme import BANNER_CREATE
 
 
 class CreateScreen(Screen):
-    def __init__(self, port_was_closed: bool = False, firewall_opened: bool = False) -> None:
+    def __init__(self, port_was_closed: bool = False, firewall_opened: bool = False, firewall_cancelled: bool = False) -> None:
         super().__init__()
         self.port_was_closed = port_was_closed
         self.firewall_opened = firewall_opened
+        self.firewall_cancelled = firewall_cancelled
         # Watchdog state: a failed open is not retried every 20 s,
         # it is retried only after the port becomes open again and
         # then closes again. The banner kind tracks whether a
@@ -36,6 +37,7 @@ class CreateScreen(Screen):
         # when the port opens again.
         self._firewall_banner_kind: str | None = (
             "success" if port_was_closed and firewall_opened
+            else "cancelled" if port_was_closed and firewall_cancelled
             else "failed" if port_was_closed
             else None
         )
@@ -111,6 +113,14 @@ class CreateScreen(Screen):
                     f"Remove or disable the block rule for port {port} in Windows Defender Firewall, Advanced Settings, Inbound Rules. "
                     f"Then also forward port {port} (TCP) in your router settings."
                 )
+            elif self.firewall_cancelled:
+                self._firewall_banner_kind = "cancelled"
+                command = manual_firewall_command(port)
+                banner.update(
+                    f"Firewall: port {port} was not opened because you cancelled the admin prompt. "
+                    f"Click Create Server again to try again, or run as administrator, or with sudo: {command} "
+                    f"Then also forward port {port} (TCP) in your router settings."
+                )
             else:
                 self._firewall_banner_kind = "failed"
                 command = manual_firewall_command(port)
@@ -126,6 +136,7 @@ class CreateScreen(Screen):
     def _set_firewall_banner(self, opened: bool) -> None:
         self.port_was_closed = True
         self.firewall_opened = opened
+        self.firewall_cancelled = False
         self._show_router_banner()
 
     def _clear_firewall_banner(self) -> None:
@@ -137,6 +148,7 @@ class CreateScreen(Screen):
             pass
         self._firewall_banner_kind = None
         self.port_was_closed = False
+        self.firewall_cancelled = False
 
     def _firewall_watch(self) -> None:
         """Re-check the firewall while Create Server waits.
@@ -146,7 +158,10 @@ class CreateScreen(Screen):
         nothing, because a firewall drop never reaches the app,
         while the client times out after 30 s. This loop checks
         every 20 s, tries to open a newly closed port, and warns
-        on the Create page when opening fails.
+        on the Create page when opening fails. It never prompts
+        for elevation: it uses the plain ensure_firewall_port,
+        not the menu elevation path, so a cancelled prompt is
+        never re-prompted from here.
         """
         from ..core.firewall import check_firewall_port, ensure_firewall_port
 
@@ -155,7 +170,7 @@ class CreateScreen(Screen):
                 port = self.config.session_port
                 if check_firewall_port(port):
                     self._firewall_watch_failed = False
-                    if self._firewall_banner_kind == "failed":
+                    if self._firewall_banner_kind in ("failed", "cancelled"):
                         try:
                             self.app.call_from_thread(self._clear_firewall_banner)
                         except Exception:

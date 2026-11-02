@@ -97,7 +97,7 @@ Full details in [Docs/Advantages](docs/advantages.md).
 
 ## Limitations
 
-- First setup on the Create side: port forward 50000 on the router, once, and DDNS if the public IP changes often. The PC firewall rule for port 50000 is checked and added automatically when you click Create Server, on Windows and Linux, when Riptide has admin or passwordless sudo rights. If it cannot add the rule, the Create page shows the exact manual command.
+- First setup on the Create side: port forward 50000 on the router, once, and DDNS if the public IP changes often. The PC firewall rule for port 50000 is checked and added automatically when you click Create Server, on Windows and Linux. If Riptide is not run as admin, or sudo needs a password, it asks once on that click: UAC on Windows, pkexec on Linux. If you cancel, or it cannot add the rule, the Create page shows the exact manual command. Only the port 50000 rule is checked and opened.
 - No direct connection between two CGNAT devices on IPv4, unless both have global IPv6. There is no relay fallback.
 - Folders cannot be sent yet. Zip a folder first, or select its files one by one.
 - No resume for an interrupted file. It restarts from the start.
