@@ -1,88 +1,121 @@
-# riptide
+# Riptide
 
-Direct, encrypted PC-to-PC file transfer in the terminal. No cloud upload, no website in the data path.
+Riptide is a terminal program for direct, encrypted, PC to PC file transfer. Run `riptide` in a folder, connect two computers, and send files from one to the other over one encrypted TCP connection. Files go straight from sender to receiver. No server stores a copy in between.
 
-```
-          Ψ  R I P T I D E  Ψ
-     ~~~  direct file transfer  ~~~
-```
+The name comes from Minecraft. Riptide is the trident enchantment that launches the player forward at high speed. With an Elytra in rain, Riptide plus Elytra is the fastest travel method in Minecraft. Riptide the program aims for the same idea for files: the shortest route, from one PC to the other.
 
-Theme: dark grey background, bright soft red accent. The UI never displays a port number.
+## Screenshots
 
-## Install (GitHub only, no PyPI)
+Add screenshots to a `screenshots/` folder next to this README, with these filenames.
 
-The name is tentative, so this is not published to PyPI.
+![Homepage](screenshots/homepage.png)
+
+![Create Server page](screenshots/create-server.png)
+
+![Join Server page](screenshots/join-server.png)
+
+![File transfer page](screenshots/transfer.png)
+
+## Features
+
+- Direct session between two PCs. One side listens, the other dials in. Both sides must be online at the same time.
+- Either side can send files after the session opens. File direction does not depend on connection direction.
+- Multiple file selection. Select files with Space, send the batch with Enter.
+- File manager with folders, live search in `Find:`, auto-highlight of the first file or folder, and `0` to deselect all.
+- File requests with approval. Type a peer path, press Enter, and nothing is sent until the peer presses Allow.
+- Saved connections. Peers, hostnames, and certificate fingerprints are saved in `~/.riptide/config.toml`. Saved devices appear on the Join Server page.
+- Live progress with speed, transferred total, remaining size, and ETA, on sender and receiver.
+- Hash verification. Each file is SHA-256 hashed before sending, written as `.part` on receipt, and renamed only if the hash matches.
+- TLS encryption for headers and file bytes, with per-machine self-signed certificates.
+- Fingerprint approval. First connection to a peer shows its certificate fingerprint for approval. A changed fingerprint later aborts the session.
+- CGNAT check and public address display on Create Server. A red banner appears if CGNAT blocks inbound connections.
+- Dark grey terminal UI with a soft red accent, for Windows and Linux.
+
+Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [docs/security.md](docs/security.md).
+
+## Installation
+
+GitHub only. Riptide is not published to PyPI.
+
+Requirements: Python 3.11 or newer, `pipx`, `git`, Windows or Linux.
 
 ```sh
 pipx install git+https://github.com/mohakps/riptide
 ```
 
-Then, from any folder you want to share from or receive into:
+Run it from the folder you want to send from or receive into:
 
 ```sh
 riptide
-riptide --help
-riptide --version
 ```
 
-## Usage, v4: Create Server / Join Server, over TLS
-
-Main menu: Create Server, Join Server, Exit. Arrow keys + Enter, Esc to go back. Set-up is disabled in the menu in v4.
-
-There is no pairing code in v4, and no Send / Receive menu. File direction is independent of who created or joined. v4 rolls back from v3 SSH to TLS, because SSH added too much complication for this pair.
-
-### The one networking rule
-
-The CGNAT side must be the side that dials out. "Create" and "Join" are session roles, not network roles. Calling the CGNAT side "server" does not make it reachable.
-
-### Create Server (CGNAT side, if one side is CGNAT)
-
-1. Past hosts are shown as buttons: tap one to fill the address, or type a new one. The address can be a hostname, an IPv4 address, or an IPv6 address (with or without brackets). `user@host` is also accepted, the host part is used.
-2. Your riptide dials the joiner's TLS listener. Outbound from CGNAT works, return traffic is allowed back.
-3. On first connect, the joiner's certificate fingerprint is shown and you press Allow to trust it, or Deny to abort. Allow/Deny are hidden until a fingerprint actually needs approval. A changed fingerprint aborts instead of silently trusting a new host.
-4. You are now in a session. Either side can send or download from here.
-
-### Join Server (public side, if one side is CGNAT)
-
-1. Open Join Server and keep it open. You do not dial the creator, because the creator may be behind CGNAT and unreachable.
-2. When the creator dials in, Allow/Deny appear, only then. Press Allow to accept the session. They are hidden before an incoming request.
-3. You are now in the same session. Either side can send or download from here.
-
-### In a session
-
-- Send selected: pick local files (type a name, Tab to complete, Enter to add, or paste dropped paths), they go to the other side's folder where riptide was launched.
-- Download remote file: type a remote file name, it comes to your folder.
-- Speed is shown while sending, computed from bytes sent and elapsed time, with remaining size and ETA.
-- The receiver sees progress too: received bytes, total, speed, remaining, and ETA are shown on the receiving side, not just the sending side.
-- The session does not cut off when idle: the socket timeout that caused a 30-second idle cut-off in v2 is cleared, TCP keepalive is enabled, and a heartbeat ping is sent every 10 seconds.
-- Files are written with a `.part` suffix and renamed only after SHA-256 matches. A mismatch is reported and kept as `.part`, not renamed.
-
-### One-time network step for the public side
-
-If the creator is the public side, their router must forward the riptide session port to their machine once. The internal session port is 50000. The CGNAT side needs no port forward. If both sides have a unique global IPv6 address, they can connect directly over IPv6 and CGNAT on IPv4 does not matter.
-
-Saved peers live in `~/.riptide/config.toml` (on Windows, the `.riptide` folder under your home directory). That file contains hosts and fingerprints only, never private keys. TLS identity keys live under `~/.riptide/` with the key file at 0600.
-
-## Security notes, v4
-
-- Sessions are TLS-encrypted, with a self-signed identity per machine.
-- On first connect, the creator checks the joiner's certificate fingerprint and presses Allow; a changed fingerprint aborts the session instead of silently trusting the new host.
-- No pairing code, no pairing listener, no public key pasting, no password sharing.
-- Partial files stay as `.part` until verified, so a failed transfer does not look like a complete file.
-
-## Limitations in v4
-
-- Files only, no folders.
-- If both sides are CGNAT on IPv4 and neither has IPv6, this model does not work on its own: a reachable third peer or relay would be needed.
-- Live two-machine CGNAT testing over TLS is still needed for the v4 fixes (speed, receiver progress, Allow/Deny visibility, idle heartbeat). Localhost tests pass for both directions, download, receiver progress, host parsing, and fingerprint-change abort.
-- Set-up SSH from v1 is present in the code but disabled in the menu in v4. v4 does not use SSH for transfers.
-
-## Development
+Update:
 
 ```sh
-python -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/pip install pytest
-.venv/bin/python -m pytest -q
-python -m compileall src/riptide
+pipx upgrade riptide
 ```
+
+If upgrade fails, uninstall and install again:
+
+```sh
+pipx uninstall riptide
+pipx install git+https://github.com/mohakps/riptide
+```
+
+## Usage
+
+Create Server listens. Join Server dials. Create stays on top in the menu.
+
+1. Create side, the public side: run `riptide`, choose Create Server, and share the public address or DDNS hostname shown on that page with the other person. Keep the page open.
+2. Join side, the CGNAT side or dialling side: run `riptide`, choose Join Server, enter the creator hostname or IP, or pick a saved device, and press Enter.
+3. Approve the connection when asked, on either side.
+4. Send: select files with Space in the file manager, press Enter. Request: type a peer path in Download From Peer, press Enter, and wait for the peer to Allow it.
+5. Files arrive in the folder where the receiving side ran `riptide`.
+
+If the red CGNAT banner appears on Create Server, swap roles. Let the other side Create, and you Join. Full usage, shortcuts, and setup steps are in [docs/usage.md](docs/usage.md). Network terms and setup are in [docs/architecture.md](docs/architecture.md).
+
+### Shortcuts
+
+| Key | Action |
+| --- | --- |
+| Up / Down | Move in a list |
+| Space | Open a folder, or select a file |
+| Enter | Send selected files, or Allow a pending connection |
+| Backspace | Erase Find text, go up a folder when Find is empty, or Deny a pending connection |
+| 0 | Deselect all files |
+| Tab | Cycle between file list and download input |
+| Esc | Back, or leave the session |
+
+## Advantages
+
+- One direct transfer, at bottleneck speed. No server in the middle to slow, throttle, or queue it.
+- About half the time of a cloud transfer for large files. Cloud transfer is upload plus download. Direct transfer is one transfer.
+- No account, storage quota, or file size limit from Riptide. Disk space is the limit.
+- No third party holds a copy, so privacy does not depend on a provider policy.
+- LAN speed when both PCs are on the same LAN, using a private LAN address.
+
+Full detail is in [docs/advantages.md](docs/advantages.md).
+
+## Limitations
+
+- First setup on the Create side is manual: port forward 50000 on the router, and an inbound firewall allow on the PC, once. DDNS is needed if the public IP changes often.
+- No direct connection between two CGNAT devices on IPv4, unless both have global IPv6. There is no relay fallback.
+- Folders cannot be sent yet. Zip a folder first, or select its files one by one.
+- No resume for an interrupted file. It restarts from the start.
+- One file at a time, in batch order. No parallel streams.
+- Both sides must be online together. No offline queue.
+- You must exchange the creator address outside Riptide, by message or DDNS hostname.
+- Terminal only, Windows and Linux primarily. macOS is not specifically tested.
+
+Full detail, with workarounds where they exist, is in [docs/limitations.md](docs/limitations.md).
+
+## Docs
+
+- [Usage](docs/usage.md): detailed usage, shortcuts, setup steps, update and uninstall.
+- [Architecture](docs/architecture.md): terminology, layers, protocol, flows, and NAT behaviour.
+- [Security](docs/security.md): full security detail.
+- [Advantages](docs/advantages.md): full advantages.
+- [Limitations](docs/limitations.md): full limitations.
+- [Troubleshooting](docs/troubleshooting.md): symptom, cause, and check, in table form.
+- [Project structure](docs/project-structure.md): project layout, with per-file explanations.
+- [Sources and references](docs/sources-references.md): references, contributions, and how to contribute.
