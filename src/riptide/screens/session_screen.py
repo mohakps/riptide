@@ -469,7 +469,7 @@ class SessionScreen(Screen):
 
     def _format_selected_header(self) -> str:
         if not self.selection:
-            return "[#D7D7D7]Selected Files (0) [dim]· [#D7D7D7]\[Space\] to select file"
+            return "[#D7D7D7]Selected Files (0) [dim]· [#D7D7D7]\[Space] to select file"
         total = total_size(self.selection)
         return (
             f"[bold #FFFFFF]Selected Files ({len(self.selection)})[/]  "

@@ -73,7 +73,7 @@ class SavedDevicesList(Vertical):
                 if is_focused and i == self.selected_index:
                     st.update(f"[bold #FF6B6B]• {text}[/]")
                 else:
-                    st.update(f"[#71717A]• {text}[/]")
+                    st.update(f"[#D7D7D7]• {text}[/]")
             except Exception:
                 pass
 

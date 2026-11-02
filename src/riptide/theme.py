@@ -218,7 +218,7 @@ Static, Label {
    with a dim label above it and a hint below it, not a bare
    input. Placeholder text is grey, focus border is the accent. */
 Input {
-    border: round #3F3F46;
+    border: round #9696a3;
     background: transparent;
     color: #E8E8E8;
     height: 3;
@@ -229,7 +229,7 @@ Input:focus {
     border: round #FF6B6B;
 }
 Input > .input--placeholder {
-    color: #71717A;
+    color: #9696a3;
 }
 .composer-label {
     color: #D7D7D7;
