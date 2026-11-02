@@ -36,7 +36,7 @@ Consequences for Riptide:
 
 - Behind CGNAT, no one on the internet can dial you directly, even with a port forward on your own router. The ISP box drops unsolicited inbound packets, because it has no mapping for you.
 - You can still dial out. Outbound connections create a mapping in the CGNAT box, and replies to that outbound connection are allowed back in. The CGNAT side must be the Join side, the dialler, never the Create side, the listener.
-- Riptide checks this on Create Server. It checks the PC address, the router WAN address via UPnP, and the public address via STUN. If the WAN address is in `100.64.0.0/10`, or is private while differing from the public address, it shows a red banner. If UPnP is off, the check is inconclusive and shows nothing, rather than a false alarm. No banner does not prove you are not behind CGNAT.
+- Riptide does not auto-detect this on Create Server. If you are behind CGNAT, you need to know that from your ISP or network setup, and use Join Server instead of Create Server, with the other side creating.
 
 ### Simple NAT and symmetric NAT
 

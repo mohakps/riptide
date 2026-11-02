@@ -7,7 +7,6 @@ import pytest
 from textual.app import App
 from textual.widgets import Input, Static
 
-from riptide.core import nat as nat_mod
 from riptide.core.session import Session
 from riptide.core.transfer import TransferProgress
 from riptide.screens.create import CreateScreen
@@ -46,18 +45,12 @@ def test_swapped_page_titles():
 
 
 @pytest.mark.asyncio
-async def test_listener_page_title_and_cgnat_banner():
+async def test_listener_page_title():
     app = _App(JoinScreen())
     async with app.run_test(size=(100, 40)) as pilot:
         screen = app.screen
         title = screen.query_one("#session_host_title", Static).render().plain
         assert title.strip() == BANNER_CREATE.strip()
-        # Banner starts empty/hidden, then shows on a positive check.
-        banner = screen.query_one("#cgnat_banner", Static)
-        assert banner.render().plain.strip() == ""
-        screen._show_cgnat_banner()
-        assert "CGNAT detected" in banner.render().plain
-        assert "Join Server" in banner.render().plain
 
 
 @pytest.mark.asyncio
@@ -73,15 +66,6 @@ async def test_dialler_page_title_and_hostname_input():
         assert 5 <= host.region.x <= 15
         labels = [n.render().plain for n in screen.query(Static) if "HOSTNAME" in n.render().plain]
         assert labels
-
-
-def test_nat_detect_cgnat_cases():
-    assert nat_mod.detect_cgnat("100.64.1.10", "203.0.113.10") is True
-    assert nat_mod.detect_cgnat("192.168.1.1", "203.0.113.10") is True
-    assert nat_mod.detect_cgnat("203.0.113.10", "203.0.113.10") is False
-    assert nat_mod.detect_cgnat("", "203.0.113.10") is False
-    assert nat_mod.is_cgnat_ip("100.64.0.1") is True
-    assert nat_mod.is_cgnat_ip("192.168.1.1") is False
 
 
 class _FakeSock:

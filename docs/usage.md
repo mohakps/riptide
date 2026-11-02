@@ -18,7 +18,7 @@ From v0.6.0 onward, Create means listener and Join means dialler. Older versions
 5. Request: type a peer path in Download From Peer, press Enter. The peer sees Allow and Deny. On Allow, the file arrives as a normal send. On Deny, nothing is sent.
 6. Files arrive in the folder where the receiving side ran `riptide`, under their original filenames.
 
-If the red CGNAT banner appears on Create Server, swap roles. Let the other side Create, and you Join. See [architecture.md](architecture.md) for CGNAT, port forwarding, firewall, and DDNS.
+If you are behind CGNAT, swap roles. Let the other side Create, and you Join. See [architecture.md](architecture.md) for CGNAT, port forwarding, firewall, and DDNS.
 
 ## Launch folder
 

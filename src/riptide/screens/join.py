@@ -24,7 +24,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
-from ..core.nat import detect_cgnat_auto, public_ip
+from ..core.nat import public_ip
 from ..core.session import JoinListener
 from ..theme import BANNER_CREATE
 
@@ -45,9 +45,6 @@ class JoinScreen(Screen):
         self._deny_btn: Button | None = None
 
     def compose(self) -> ComposeResult:
-        # CGNAT banner, top centre, empty and hidden until a check
-        # actually finds CGNAT. See _check_cgnat().
-        yield Static("", id="cgnat_banner")
         yield Static("", id="router_banner")
         yield VerticalScroll(
             Horizontal(
@@ -84,16 +81,6 @@ class JoinScreen(Screen):
             id="footer_bar",
         )
 
-    def _show_cgnat_banner(self) -> None:
-        try:
-            banner = self.query_one("#cgnat_banner", Static)
-            banner.update(
-                "CGNAT detected: peers cannot reach this device. "
-                "Swap roles — let the other peer Create Server, and use Join Server here instead."
-            )
-            banner.styles.display = "block"
-        except Exception:
-            pass
     def _show_router_banner(self) -> None:
         try:
             banner = self.query_one("#router_banner", Static)
@@ -128,20 +115,6 @@ class JoinScreen(Screen):
             self.app.call_from_thread(self._update_public_ip, ip)
         except Exception:
             pass
-
-    def _check_cgnat(self) -> None:
-        # Runs in a worker thread so the page stays responsive.
-        # Only a positive result shows the banner; an inconclusive
-        # check shows nothing, rather than a false alarm.
-        try:
-            result = detect_cgnat_auto()
-        except Exception:
-            result = None
-        if result:
-            try:
-                self.app.call_from_thread(self._show_cgnat_banner)
-            except Exception:
-                pass
 
     def _set_allow_visible(self, visible: bool) -> None:
         try:
@@ -242,9 +215,6 @@ class JoinScreen(Screen):
         except Exception:
             pass
         self._set_allow_visible(False)
-        # CGNAT check, automatically, as soon as Create Server opens.
-        # This page is the listener, so CGNAT is what breaks it.
-        threading.Thread(target=self._check_cgnat, daemon=True).start()
         # Public IP, same timing, so the joiner has something to dial.
         threading.Thread(target=self._fetch_public_ip, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()

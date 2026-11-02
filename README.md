@@ -26,7 +26,7 @@ The name comes from Minecraft. Riptide is the trident enchantment that launches 
 - Hash verification. Each file is SHA-256 hashed before sending, written as `.part` on receipt, and renamed only if the hash matches.
 - TLS encryption for headers and file bytes, with per-machine self-signed certificates.
 - Fingerprint approval. First connection to a peer shows its certificate fingerprint for approval. A changed fingerprint later aborts the session.
-- CGNAT check and public address display on Create Server. A red banner appears if CGNAT blocks inbound connections.
+- Public address display on Create Server.
 - Dark grey terminal UI with a soft red accent, for Windows and Linux.
 
 Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [Docs/Security](docs/security.md).
@@ -71,7 +71,7 @@ Create Server listens. Join Server dials. Create stays on top in the menu.
 4. Send: select files with Space in the file manager, press Enter. Request: type a peer path in Download From Peer, press Enter, and wait for the peer to Allow it.
 5. Files arrive in the folder where the receiving side ran `riptide`.
 
-If the red CGNAT banner appears on Create Server, swap roles. Let the other side Create, and you Join. Full usage, shortcuts, and setup steps are in [Docs/Usage](docs/usage.md). Learn more about CGNAT or who should create server in [Docs/Architecture](docs/architecture.md).
+If you are behind CGNAT, swap roles. Let the other side Create, and you Join. Full usage, shortcuts, and setup steps are in [Docs/Usage](docs/usage.md). Learn more about CGNAT or who should create server in [Docs/Architecture](docs/architecture.md).
 
 ### Shortcuts
 

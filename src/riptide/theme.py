@@ -453,19 +453,6 @@ ListView:focus > ListItem.--highlight Label {
     padding: 0;
     margin: 0;
 }
-/* CGNAT error banner, top centre, hidden until a CGNAT check
-   actually finds one. Shown only on Create Server (the listener). */
-#cgnat_banner {
-    display: none;
-    width: 100%;
-    height: 3;
-    background: #FF6B6B;
-    color: #121212;
-    text-style: bold;
-    text-align: center;
-    padding: 1 2;
-    margin: 0 0 1 0;
-}
 /* Router port-forwarding notice, shown only when port was closed in OS firewall */
 #router_banner {
     display: none;
