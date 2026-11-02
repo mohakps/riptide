@@ -23,7 +23,19 @@ async def test_menu_screen_composition():
         assert len(screen.query("#exit")) == 0
         # Ensure option list exists
         assert len(screen.query("#menu_list")) == 1
-
+        # Ensure new footer_bar exists with 3 keymap-items
+        footer = screen.query_one("#footer_bar")
+        footer_items = footer.query(".keymap-item")
+        assert len(footer_items) == 3
+        footer_text = " ".join(node.render().plain for node in footer_items)
+        assert "[↑/↓]" in footer_text
+        assert "Navigate" in footer_text
+        assert "[Enter]" in footer_text
+        assert "Select" in footer_text
+        assert "[Esc]" in footer_text
+        assert "Quit" in footer_text
+        # Ensure old keymap-bar class is gone
+        assert len(screen.query(".keymap-bar")) == 0
 @pytest.mark.asyncio
 async def test_menu_arrow_keys_navigate():
     app = DummyApp()

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import OptionList, Static
+from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from .. import __version__
@@ -25,7 +25,12 @@ class MenuScreen(Screen):
             Static(f"v{__version__}", classes="version-tag"),
             Static(TAGLINES["home"], classes="subheader"),
             OptionList(*options, id="menu_list"),
-            Static(r"[↑/↓] Navigate   \[Enter] Select   [Esc/q] Quit", classes="keymap-bar"),
+        )
+        yield Horizontal(
+            Label(r"[bold #E8E8E8]\[↑/↓][/] [dim #FFFFFF]Navigate[/]", classes="keymap-item keymap-left"),
+            Label(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Select[/]", classes="keymap-item"),
+            Label(r"[bold #E8E8E8]\[Esc][/] [dim #FFFFFF]Quit[/]", classes="keymap-item keymap-right"),
+            id="footer_bar",
         )
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
