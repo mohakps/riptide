@@ -179,15 +179,67 @@ async def test_menu_clicking_create_server_firewall_failed(tmp_path: Path):
 
 
 def test_ensure_firewall_port():
-    """ensure returns was_open, opened, is_open_now, and trusts a successful open."""
+    """ensure re-checks after opening, it does not trust the open command alone."""
     with patch("riptide.core.firewall.check_firewall_port", return_value=True):
         assert ensure_firewall_port(50000) == (True, False, True)
-    with patch("riptide.core.firewall.check_firewall_port", return_value=False):
+    # Closed, open command runs, re-check finds it open.
+    with patch("riptide.core.firewall.check_firewall_port", side_effect=[False, True]):
         with patch("riptide.core.firewall.open_firewall_port", return_value=True):
             assert ensure_firewall_port(50000) == (False, True, True)
-    with patch("riptide.core.firewall.check_firewall_port", return_value=False):
-        with patch("riptide.core.firewall.open_firewall_port", return_value=False):
+    # Closed, open command claims success, but re-check still finds it
+    # closed, for example when a block rule still exists.
+    with patch("riptide.core.firewall.check_firewall_port", side_effect=[False, False]):
+        with patch("riptide.core.firewall.open_firewall_port", return_value=True):
             assert ensure_firewall_port(50000) == (False, False, False)
+
+
+def test_firewall_check_windows_block_wins_and_udp_ignored():
+    """A block rule beats an allow rule, and a UDP rule is not a TCP open."""
+    sep = "-" * 70
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        allow_block = f"""Rule Name:                            Riptide
+{sep}
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             TCP
+LocalPort:                            50000
+
+Rule Name:                            Block Riptide
+{sep}
+Enabled:                              Yes
+Direction:                            In
+Action:                               Block
+Protocol:                             TCP
+LocalPort:                            50000
+"""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=allow_block)
+            assert check_firewall_port(50000) is False
+        udp_only = f"""Rule Name:                            Riptide UDP
+{sep}
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             UDP
+LocalPort:                            50000
+"""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=udp_only)
+            assert check_firewall_port(50000) is False
+
+
+def test_firewall_open_windows_enables_disabled_rule():
+    """Add fails when the rule already exists disabled, so open enables it."""
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stdout="", stderr="already exists"),
+                MagicMock(returncode=0, stdout="Ok."),
+            ]
+            assert open_firewall_port(50000) is True
+            # Second call is the enable, not another add.
+            assert mock_run.call_args_list[1][0][0][3] == "set"
 
 
 def test_manual_firewall_command_contains_port():

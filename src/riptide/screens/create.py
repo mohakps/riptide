@@ -35,6 +35,32 @@ from ..core.session import create_session, parse_host_input
 from ..theme import BANNER_JOIN
 
 
+def friendly_dial_error(exc: Exception, port: int) -> str:
+    """Translate a dial failure into a cause the user can act on.
+
+    A raw WinError 10060 says nothing about why the connection
+    timed out. On a firewall drop, no packet ever reaches the
+    creator, so the creator shows no error at all. The dialler is
+    the only place that can warn, and the usual cause is the
+    creator firewall or router forward for the session port.
+    """
+    text = str(exc)
+    lower = text.lower()
+    if "10060" in text or "timed out" in lower or isinstance(exc, TimeoutError):
+        return (
+            f"Connection timed out (10060). The creator did not answer on port {port}. "
+            f"On the creator PC, check Create Server is open, the firewall rule for port {port} is on, "
+            f"and the router forwards TCP {port} to that PC. "
+            f"Ask the creator to click Create Server again, so Riptide can re-check and open the firewall."
+        )
+    if "10061" in text or "refused" in lower or isinstance(exc, ConnectionRefusedError):
+        return (
+            f"Connection refused. The creator is not listening on port {port}, "
+            f"or Create Server is not open on that PC."
+        )
+    return text
+
+
 class SavedDevicesList(Vertical):
     """Focusable unordered list of saved peers."""
 
@@ -301,7 +327,9 @@ class CreateScreen(Screen):
             from .session_screen import SessionScreen
             self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "joiner"))
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Failed: {exc}")
+            self.app.call_from_thread(
+                self._set_status, f"Failed: {friendly_dial_error(exc, self.config.session_port)}"
+            )
 
     def on_mount(self) -> None:
         try:

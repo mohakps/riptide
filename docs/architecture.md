@@ -61,7 +61,7 @@ Port forwarding on your own router does nothing behind CGNAT, because the ISP bo
 
 A firewall is separate from NAT. Even with a correct port forward, the Create side PC firewall can drop the inbound connection.
 
-- Windows: on clicking Create Server, Riptide checks netsh inbound rules for TCP port 50000 and adds a rule named Riptide File Transfer if it is closed. This needs administrator rights.
+- Windows: on clicking Create Server, Riptide checks netsh inbound rules for TCP port 50000 and adds a rule named Riptide if it is closed, or enables an existing disabled rule with that name. This needs administrator rights. A block rule for the same port wins over an allow rule, so Riptide reports the port as closed when a block rule exists, and does not claim an allow rule fixed it.
 - Linux: on clicking Create Server, Riptide checks the active firewall, `ufw`, `firewalld`, `iptables`, or `nftables`, and adds a rule for TCP port 50000 if it is closed. It uses passwordless sudo, so it does not hang on a password prompt it cannot show. If no firewall is active, there is nothing to allow.
 - Router firewall: some routers have a firewall in addition to NAT. A port forward rule normally implies an allow, but check a separate firewall toggle if your router has one.
 

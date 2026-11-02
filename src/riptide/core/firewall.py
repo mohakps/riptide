@@ -34,6 +34,69 @@ def _port_in_localport(localport: str, port: int) -> bool:
     return False
 
 
+def _parse_netsh_rules(stdout: str) -> list[dict[str, str]]:
+    """Parse netsh show rule output into one dict per rule.
+
+    Rules are separated by a dash line, and each rule starts with a
+    Rule Name line. Splitting only on the dash line is fragile when
+    the separator length changes, so both are used as boundaries.
+    """
+    rules: list[dict[str, str]] = []
+    props: dict[str, str] = {}
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped and set(stripped) == {"-"}:
+            if props:
+                rules.append(props)
+                props = {}
+            continue
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        k = k.strip().lower()
+        if k == "rule name" and props and "action" in props:
+            rules.append(props)
+            props = {}
+        props[k] = v.strip().lower()
+    if props:
+        rules.append(props)
+    return rules
+
+
+def _windows_rule_matches(rule: dict[str, str], port: int) -> bool:
+    """True if a netsh rule covers inbound TCP traffic on the port."""
+    if rule.get("enabled") != "yes":
+        return False
+    if rule.get("direction") and rule.get("direction") != "in":
+        return False
+    if rule.get("protocol") and rule.get("protocol") not in ("tcp", "any"):
+        return False
+    return _port_in_localport(rule.get("localport", ""), port)
+
+
+def windows_block_rule_exists(port: int) -> bool:
+    """True if an enabled inbound block rule covers the port on Windows.
+
+    A block rule wins over an allow rule in Windows Firewall, so an
+    allow rule alone does not open the port in that case.
+    """
+    if get_os() != "windows":
+        return False
+    try:
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", "name=all", "dir=in"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if res.returncode != 0 or not isinstance(res.stdout, str):
+            return False
+        return any(
+            rule.get("action") == "block" and _windows_rule_matches(rule, port)
+            for rule in _parse_netsh_rules(res.stdout)
+        )
+    except Exception:
+        return False
+
+
 def check_firewall_port(port: int) -> bool:
     """Check if the given port is open in the OS firewall.
 
@@ -47,21 +110,22 @@ def check_firewall_port(port: int) -> bool:
             # Query inbound rules using netsh for fast execution (~50ms)
             cmd = ["netsh", "advfirewall", "firewall", "show", "rule", "name=all", "dir=in"]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if res.returncode != 0:
+            if res.returncode != 0 or not isinstance(res.stdout, str):
                 return False
 
-            blocks = res.stdout.split("----------------------------------------------------------------------")
-            for block in blocks:
-                props: dict[str, str] = {}
-                for line in block.splitlines():
-                    if ":" in line:
-                        k, v = line.split(":", 1)
-                        props[k.strip().lower()] = v.strip().lower()
-
-                if props.get("action") == "allow" and props.get("enabled") == "yes":
-                    if _port_in_localport(props.get("localport", ""), port):
-                        return True
-            return False
+            rules = _parse_netsh_rules(res.stdout)
+            allow = any(
+                rule.get("action") == "allow" and _windows_rule_matches(rule, port)
+                for rule in rules
+            )
+            block = any(
+                rule.get("action") == "block" and _windows_rule_matches(rule, port)
+                for rule in rules
+            )
+            # A block rule wins over an allow rule, so allow plus
+            # block is still closed. Reporting it as open was the
+            # silent failure behind a dialler timeout.
+            return allow and not block
         except Exception:
             return False
 
@@ -119,7 +183,7 @@ def check_firewall_port(port: int) -> bool:
     return True
 
 
-def open_firewall_port(port: int, rule_name: str = "Riptide File Transfer") -> bool:
+def open_firewall_port(port: int, rule_name: str = "Riptide") -> bool:
     """Attempt to open the given port in the OS firewall.
 
     Checks the operating system first and runs the corresponding rule addition.
@@ -129,6 +193,9 @@ def open_firewall_port(port: int, rule_name: str = "Riptide File Transfer") -> b
 
     if os_name == "windows":
         try:
+            # Single-word rule name: a name with spaces was fragile
+            # in netsh argument parsing. The old "Riptide File
+            # Transfer" name is still tried when enabling, below.
             cmd = [
                 "netsh", "advfirewall", "firewall", "add", "rule",
                 f"name={rule_name}",
@@ -138,7 +205,22 @@ def open_firewall_port(port: int, rule_name: str = "Riptide File Transfer") -> b
                 f"localport={port}",
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            return res.returncode == 0
+            if res.returncode == 0:
+                return True
+            # Add fails when a rule with that name already exists,
+            # which is exactly the case when the user turned the
+            # rule off instead of deleting it. Enable it instead.
+            for name in (rule_name, "Riptide File Transfer"):
+                res = subprocess.run(
+                    [
+                        "netsh", "advfirewall", "firewall", "set", "rule",
+                        f"name={name}", "new", "enable=yes",
+                    ],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if res.returncode == 0:
+                    return True
+            return False
         except Exception:
             return False
 
@@ -197,7 +279,7 @@ def manual_firewall_command(port: int) -> str:
     os_name = get_os()
     if os_name == "windows":
         return (
-            f'netsh advfirewall firewall add rule name="Riptide File Transfer" '
+            f"netsh advfirewall firewall add rule name=Riptide "
             f"dir=in action=allow protocol=TCP localport={port}"
         )
     if os_name == "linux":
@@ -217,16 +299,16 @@ def ensure_firewall_port(port: int) -> tuple[bool, bool, bool]:
     """Check the port, open it if closed, and report the result.
 
     Returns (was_open, opened, is_open_now). was_open is the state
-    before any change. opened is True only when an open command
-    succeeded for a port that was closed. is_open_now is True when
-    the port was already open, or an open command succeeded.
+    before any change. opened and is_open_now are True only when
+    a re-check after opening finds the port open. Trusting the
+    open command alone was wrong: an allow rule does not open
+    the port when a block rule for the same port still exists.
     When opening fails, is_open_now is False and the caller should
     show manual_firewall_command(port) to the user.
     """
     was_open = check_firewall_port(port)
     if was_open:
         return (True, False, True)
-    opened = open_firewall_port(port)
-    if opened:
-        return (False, True, True)
-    return (False, False, check_firewall_port(port))
+    open_firewall_port(port)
+    is_open_now = check_firewall_port(port)
+    return (False, is_open_now, is_open_now)

@@ -34,6 +34,17 @@ class JoinScreen(Screen):
         super().__init__()
         self.port_was_closed = port_was_closed
         self.firewall_opened = firewall_opened
+        # Watchdog state: a failed open is not retried every 20 s,
+        # it is retried only after the port becomes open again and
+        # then closes again. The banner kind tracks whether a
+        # failure banner is currently shown, so it can be cleared
+        # when the port opens again.
+        self._firewall_banner_kind: str | None = (
+            "success" if port_was_closed and firewall_opened
+            else "failed" if port_was_closed
+            else None
+        )
+        self._firewall_watch_failed = port_was_closed and not firewall_opened
         self.cwd = Path.cwd()
         self.config = load_config()
         self._pending: tuple[str, str] | None = None
@@ -84,16 +95,26 @@ class JoinScreen(Screen):
 
     def _show_router_banner(self) -> None:
         try:
-            from ..core.firewall import manual_firewall_command
+            from ..core.firewall import manual_firewall_command, windows_block_rule_exists
 
             banner = self.query_one("#router_banner", Static)
             port = self.config.session_port
             if self.firewall_opened:
+                self._firewall_banner_kind = "success"
                 banner.update(
                     f"Firewall: port {port} opened automatically. "
                     f"Please also forward port {port} (TCP) in your router settings."
                 )
+            elif windows_block_rule_exists(port):
+                self._firewall_banner_kind = "failed"
+                banner.update(
+                    f"Firewall: port {port} is blocked by a block rule. "
+                    f"An allow rule alone will not open it. "
+                    f"Remove or disable the block rule for port {port} in Windows Defender Firewall, Advanced Settings, Inbound Rules. "
+                    f"Then also forward port {port} (TCP) in your router settings."
+                )
             else:
+                self._firewall_banner_kind = "failed"
                 command = manual_firewall_command(port)
                 banner.update(
                     f"Firewall: port {port} was closed and could not be opened automatically. "
@@ -103,6 +124,61 @@ class JoinScreen(Screen):
             banner.styles.display = "block"
         except Exception:
             pass
+
+    def _set_firewall_banner(self, opened: bool) -> None:
+        self.port_was_closed = True
+        self.firewall_opened = opened
+        self._show_router_banner()
+
+    def _clear_firewall_banner(self) -> None:
+        try:
+            banner = self.query_one("#router_banner", Static)
+            banner.update("")
+            banner.styles.display = "none"
+        except Exception:
+            pass
+        self._firewall_banner_kind = None
+        self.port_was_closed = False
+
+    def _firewall_watch(self) -> None:
+        """Re-check the firewall while Create Server waits.
+
+        The menu check only runs when Create Server is clicked.
+        If the rule is turned off after that, the creator hears
+        nothing, because a firewall drop never reaches the app,
+        while the joiner times out after 30 s. This loop checks
+        every 20 s, tries to open a newly closed port, and warns
+        on the Create page when opening fails.
+        """
+        from ..core.firewall import check_firewall_port, ensure_firewall_port
+
+        while not self._stopped.wait(timeout=20):
+            try:
+                port = self.config.session_port
+                if check_firewall_port(port):
+                    self._firewall_watch_failed = False
+                    if self._firewall_banner_kind == "failed":
+                        try:
+                            self.app.call_from_thread(self._clear_firewall_banner)
+                        except Exception:
+                            pass
+                    continue
+                if self._firewall_watch_failed:
+                    continue
+                _was_open, opened, is_open_now = ensure_firewall_port(port)
+                if is_open_now:
+                    try:
+                        self.app.call_from_thread(self._set_firewall_banner, True)
+                    except Exception:
+                        pass
+                else:
+                    self._firewall_watch_failed = True
+                    try:
+                        self.app.call_from_thread(self._set_firewall_banner, False)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
 
     def _update_public_ip(self, ip: str | None) -> None:
@@ -232,6 +308,9 @@ class JoinScreen(Screen):
         threading.Thread(target=self._worker, daemon=True).start()
         if self.port_was_closed:
             self._show_router_banner()
+        # Re-check while waiting, so turning the rule off after
+        # clicking Create Server still warns and tries to open it.
+        threading.Thread(target=self._firewall_watch, daemon=True).start()
 
     def on_unmount(self) -> None:
         # Free the listener port when leaving, otherwise a later

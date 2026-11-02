@@ -162,13 +162,13 @@ async def test_create_screen_redesign():
 
         # 4. Red for focused device, grey by default
         assert any(span.style == "bold #FF6B6B" for span in item0.render().spans)
-        assert any(span.style == "#71717A" for span in item1.render().spans)
-        assert any(span.style == "#71717A" for span in item2.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item1.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item2.render().spans)
 
         # 5. Up/down navigates between devices
         await pilot.press("down")
         assert dev_list.selected_index == 1
-        assert any(span.style == "#71717A" for span in item0.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item0.render().spans)
         assert any(span.style == "bold #FF6B6B" for span in item1.render().spans)
 
         await pilot.press("down")
@@ -185,9 +185,9 @@ async def test_create_screen_redesign():
         assert cs.focused == host_input
 
         # 7. When hostname input is focused, don't highlight saved devices (all grey)
-        assert any(span.style == "#71717A" for span in item0.render().spans)
-        assert any(span.style == "#71717A" for span in item1.render().spans)
-        assert any(span.style == "#71717A" for span in item2.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item0.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item1.render().spans)
+        assert any(span.style == "#D7D7D7" for span in item2.render().spans)
         assert not any(span.style == "bold #FF6B6B" for span in item1.render().spans)
 
         # Tab back to saved devices
