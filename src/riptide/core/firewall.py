@@ -14,16 +14,22 @@ def get_os() -> str:
 
 
 def _port_in_localport(localport: str, port: int) -> bool:
-    """True if a netsh LocalPort value covers the port.
+    """True if a netsh LocalPort value explicitly covers the port.
 
-    Handles single ports, comma lists, ranges like 49990-50010, and Any.
+    Handles single ports, comma lists, and ranges like 49990-50010.
+    A value of Any is deliberately NOT counted: Riptide only
+    cares about rules for port 50000, and Any-port rules are
+    program or service rules, not port rules. Counting Any made
+    a normal Windows machine, with 35 Any-port rules and 2 Any
+    block rules, always look blocked and always skip the UAC
+    prompt, even though traffic worked.
     """
     for token in localport.split(","):
         token = token.strip().lower()
         if not token:
             continue
         if token == "any":
-            return True
+            continue
         if "-" in token:
             try:
                 low, high = token.split("-", 1)
@@ -39,18 +45,18 @@ def _port_in_localport(localport: str, port: int) -> bool:
 def _parse_netsh_rules(stdout: str) -> list[dict[str, str]]:
     """Parse netsh show rule output into one dict per rule.
 
-    Rules are separated by a dash line, and each rule starts with a
-    Rule Name line. Splitting only on the dash line is fragile when
-    the separator length changes, so both are used as boundaries.
+    Each rule starts with a Rule Name line, followed by a dash
+    line, then its fields. The dash line is inside a rule, not
+    between rules, so splitting on it used to put the rule name
+    in a separate chunk from its fields, and the matcher chunk
+    had no name. Dash lines are now ignored, and a rule ends
+    only when the next Rule Name line appears after an Action.
     """
     rules: list[dict[str, str]] = []
     props: dict[str, str] = {}
     for line in stdout.splitlines():
         stripped = line.strip()
         if stripped and set(stripped) == {"-"}:
-            if props:
-                rules.append(props)
-                props = {}
             continue
         if ":" not in line:
             continue
@@ -328,7 +334,10 @@ def _shell_execute_runas(executable: str, parameters: str) -> int:
 
     This is a thin wrapper so tests can mock it without touching
     ctypes. Return value: above 32 means success, 1223 means the
-    user cancelled the UAC prompt, 32 or below means another error.
+    user cancelled the UAC prompt, 5 means access denied, 32 or
+    below otherwise means another error. A standard-user
+    credentials prompt returns 5 when the user clicks No, while
+    an admin Yes/No prompt returns 1223, both observed live.
     ShellExecuteW returns immediately, it does not wait for the
     program, so the caller must poll check_firewall_port after it.
     """
@@ -407,7 +416,7 @@ def elevated_open_firewall_port_windows(port: int, poll_timeout: float = 30) -> 
             f"dir=in action=allow protocol=TCP localport={port}"
         )
     result = _shell_execute_runas(_netsh_path(), parameters)
-    if result == 1223:
+    if result in (1223, 5):
         return "cancelled"
     if result <= 32:
         return "failed"

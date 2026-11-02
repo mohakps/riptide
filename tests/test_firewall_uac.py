@@ -229,3 +229,88 @@ async def test_menu_cancelled_saves_closed_and_passes_cancelled(tmp_path: Path):
                 assert cfg.firewall_port_open is False
                 assert isinstance(app.screen, CreateScreen)
                 assert app.screen.firewall_cancelled is True
+
+
+def test_any_port_rules_do_not_count_for_port_50000():
+    """Any-port rules are program/service rules, not port 50000 rules.
+
+    Regression for v0.15.1: a normal Windows machine has dozens
+    of Any-port rules, including Any block rules, and counting
+    them made Riptide always report blocked and always skip the
+    UAC prompt, even though traffic worked.
+    """
+    assert fw._port_in_localport("Any", 50000) is False
+    assert fw._port_in_localport("50000", 50000) is True
+    assert fw._port_in_localport("49990-50010", 50000) is True
+    fake = """
+Rule Name:                            Some App Block
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Block
+Protocol:                             TCP
+LocalPort:                            Any
+
+Rule Name:                            Some App Allow
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             TCP
+LocalPort:                            Any
+"""
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake)
+            assert fw.windows_block_rule_exists(50000) is False
+            assert fw.check_firewall_port(50000) is False
+
+
+def test_explicit_port_allow_wins_over_any_block():
+    fake = """
+Rule Name:                            Riptide
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             TCP
+LocalPort:                            50000
+
+Rule Name:                            Some App Block
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Block
+Protocol:                             TCP
+LocalPort:                            Any
+"""
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake)
+            assert fw.check_firewall_port(50000) is True
+            assert fw.windows_block_rule_exists(50000) is False
+
+
+def test_parser_keeps_rule_name_with_its_fields():
+    fake = """
+Rule Name:                            Riptide Test
+----------------------------------------------------------------------
+Enabled:                              Yes
+Direction:                            In
+Action:                               Allow
+Protocol:                             TCP
+LocalPort:                            50000
+"""
+    rules = fw._parse_netsh_rules(fake)
+    assert len(rules) == 1
+    assert rules[0]["rule name"] == "riptide test"
+    assert rules[0]["localport"] == "50000"
+
+
+def test_windows_elevated_access_denied_is_cancelled():
+    with patch("riptide.core.firewall.get_os", return_value="windows"):
+        with patch("riptide.core.firewall._windows_riptide_rule_disabled", return_value=False):
+            with patch("riptide.core.firewall._shell_execute_runas", return_value=5):
+                with patch("riptide.core.firewall.check_firewall_port") as mock_check:
+                    assert fw.elevated_open_firewall_port_windows(50000) == "cancelled"
+                    mock_check.assert_not_called()
