@@ -132,6 +132,15 @@ App, Screen {
     padding: 1 2;
     layers: base overlay;
 }
+/* Create Server is a full screen pushed on top of the menu.
+   With a transparent background, the menu's RIPTIDE logo shows
+   through in empty rows, for example the 1-row gap between the
+   yellow firewall banner and the CREATE header. An opaque
+   background paints those rows blank instead. This changes no
+   height, position, or alignment, only what shows in empty rows. */
+CreateScreen {
+    background: #121212 !important;
+}
 Static, Label {
     background: transparent;
     color: #E8E8E8;
