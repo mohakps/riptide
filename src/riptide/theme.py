@@ -1025,7 +1025,7 @@ ProgressBar > .bar--bar {
     color: #71717A;
     margin: 1 0 0 0;
 }
-#join_bottom_section #create {
+#join_bottom_section #join {
     display: none;
 }
 """
