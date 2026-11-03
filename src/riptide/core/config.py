@@ -3,6 +3,12 @@
 Location is always Path.home() / ".riptide" / "config.toml", on every OS.
 Private keys and certificates are never stored here. A peer is identified
 by host + TLS certificate fingerprint, approved in the UI on first connect.
+
+Since v1.1, the host side also keeps trusted clients, separate from
+dial-out peers. A trusted client is identified by fingerprint, with
+the device name as a display label only. The dial-out peer list is
+keyed by host, for filling the Join address, while the trusted
+client list is keyed by fingerprint, for host-side authentication.
 """
 from __future__ import annotations
 
@@ -41,11 +47,22 @@ class Peer:
 @dataclass
 class Config:
     peers: list[Peer] = field(default_factory=list)
+    trusted_clients: list[Peer] = field(default_factory=list)
     session_port: int = DEFAULT_SESSION_PORT
     firewall_port_open: bool | None = None
     def peer_for(self, host: str) -> Peer | None:
         for peer in self.peers:
             if peer.host == host:
+                return peer
+        return None
+    def trusted_client_for_fingerprint(self, fingerprint: str) -> Peer | None:
+        for peer in self.trusted_clients:
+            if peer.fingerprint and peer.fingerprint == fingerprint:
+                return peer
+        return None
+    def trusted_client_for_device(self, device: str) -> Peer | None:
+        for peer in self.trusted_clients:
+            if peer.name and peer.name == device:
                 return peer
         return None
 
@@ -75,6 +92,15 @@ def load_config(home: Path | None = None) -> Config:
             host=str(item.get("host", "")),
             fingerprint=str(item.get("fingerprint", "")),
         ))
+    trusted_clients = []
+    for item in data.get("trusted_client", []) if isinstance(data.get("trusted_client", []), list) else []:
+        if not isinstance(item, dict):
+            continue
+        trusted_clients.append(Peer(
+            name=str(item.get("name", "")),
+            host=str(item.get("host", "")),
+            fingerprint=str(item.get("fingerprint", "")),
+        ))
     session_port = data.get("session_port", DEFAULT_SESSION_PORT)
     try:
         session_port = int(session_port)
@@ -82,11 +108,11 @@ def load_config(home: Path | None = None) -> Config:
         session_port = DEFAULT_SESSION_PORT
     firewall_val = data.get("firewall_port_open")
     firewall_port_open = bool(firewall_val) if firewall_val is not None else None
-    return Config(peers=peers, session_port=session_port, firewall_port_open=firewall_port_open)
+    return Config(peers=peers, trusted_clients=trusted_clients, session_port=session_port, firewall_port_open=firewall_port_open)
 
 
 def save_config(config: Config, home: Path | None = None) -> Path:
-    for peer in config.peers:
+    for peer in list(config.peers) + list(config.trusted_clients):
         for value in (peer.name, peer.host, peer.fingerprint):
             if _contains_private_key(value):
                 raise ValueError("refusing to store a private key in config")
@@ -98,6 +124,12 @@ def save_config(config: Config, home: Path | None = None) -> Path:
     lines.append("")
     for peer in config.peers:
         lines.append("[[peer]]")
+        lines.append(f'name = "{_escape(peer.name)}"')
+        lines.append(f'host = "{_escape(peer.host)}"')
+        lines.append(f'fingerprint = "{_escape(peer.fingerprint)}"')
+        lines.append("")
+    for peer in config.trusted_clients:
+        lines.append("[[trusted_client]]")
         lines.append(f'name = "{_escape(peer.name)}"')
         lines.append(f'host = "{_escape(peer.host)}"')
         lines.append(f'fingerprint = "{_escape(peer.fingerprint)}"')
@@ -114,5 +146,31 @@ def add_peer(config: Config, peer: Peer, home: Path | None = None) -> Config:
         existing.fingerprint = peer.fingerprint or existing.fingerprint
     else:
         config.peers.append(peer)
+    save_config(config, home=home)
+    return config
+
+
+def add_trusted_client(config: Config, peer: Peer, home: Path | None = None) -> Config:
+    """Save a host-side trusted client, keyed by fingerprint.
+
+    If the fingerprint is already trusted, update its label.
+    If the device label is already trusted with a different
+    fingerprint, replace that fingerprint, which is the explicit
+    Replace flow after a changed-fingerprint warning. Otherwise
+    append a new trusted client.
+    """
+    if peer.fingerprint:
+        existing = config.trusted_client_for_fingerprint(peer.fingerprint)
+        if existing is not None:
+            existing.name = peer.name or existing.name
+            save_config(config, home=home)
+            return config
+    if peer.name:
+        by_device = config.trusted_client_for_device(peer.name)
+        if by_device is not None:
+            by_device.fingerprint = peer.fingerprint
+            save_config(config, home=home)
+            return config
+    config.trusted_clients.append(peer)
     save_config(config, home=home)
     return config

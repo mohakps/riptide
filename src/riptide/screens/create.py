@@ -44,7 +44,7 @@ class CreateScreen(Screen):
         self._firewall_watch_failed = port_was_closed and not firewall_opened
         self.cwd = Path.cwd()
         self.config = load_config()
-        self._pending: tuple[str, str] | None = None
+        self._pending: tuple[str, str, str, str] | None = None
         self._approve_event = threading.Event()
         self._approved = False
         self._awaiting_approval = False
@@ -259,15 +259,35 @@ class CreateScreen(Screen):
         except Exception:
             pass
 
-    def _show_incoming_connection(self, device: str, fingerprint: str) -> None:
+    def _show_incoming_connection(self, device: str, fingerprint: str, status: str = "new", old_fingerprint: str = "") -> None:
         try:
             card = self.query_one("#incoming_card", Vertical)
             card.add_class("active")
-            fp_text = f"\n[dim]Fingerprint: {fingerprint[:32]}...[/]" if fingerprint else ""
+            if fingerprint:
+                fp_text = f"\n[dim]Fingerprint: {fingerprint[:32]}...[/]"
+            else:
+                # This should not happen in v1.1, because an empty
+                # client fingerprint aborts before approval. Show
+                # it explicitly if it ever does, instead of hiding it.
+                fp_text = "\n[bold #FF6B6B]Fingerprint: missing, cannot authenticate[/]"
+            if status == "known":
+                status_text = "\n[bold #78DC8C]Known peer: fingerprint matches saved[/]"
+                question = "Accept connection from this known peer?"
+            elif status == "changed":
+                old_text = f"\n[dim]Old fingerprint: {old_fingerprint[:32]}...[/]" if old_fingerprint else ""
+                status_text = (
+                    "\n[bold #FF6B6B]WARNING: Fingerprint changed for this device[/]"
+                    f"{old_text}"
+                    "\n[#E8E8E8]Accept only if this peer reinstalled Riptide or deleted its identity. Accepting here replaces the saved fingerprint.[/]"
+                )
+                question = "Replace saved fingerprint and accept?"
+            else:
+                status_text = "\n[bold #FFD166]New peer: first time, check fingerprint before Accept[/]"
+                question = "Accept connection from this peer?"
             msg = (
                 f"[bold #78DC8C]● INCOMING CONNECTION REQUEST[/]\n\n"
-                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}\n\n"
-                f"[#E8E8E8]Accept connection from this peer?[/]"
+                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}{status_text}\n\n"
+                f"[#E8E8E8]{question}[/]"
             )
             self.query_one("#incoming", Static).update(msg)
             self._set_allow_visible(True)
@@ -284,13 +304,13 @@ class CreateScreen(Screen):
         except Exception:
             pass
 
-    def _approve(self, device: str, fingerprint: str) -> bool:
-        self._pending = (device, fingerprint)
+    def _approve(self, device: str, fingerprint: str, status: str = "new", old_fingerprint: str = "") -> bool:
+        self._pending = (device, fingerprint, status, old_fingerprint)
         self._approved = False
         self._awaiting_approval = True
         self._approve_event.clear()
         try:
-            self.app.call_from_thread(self._show_incoming_connection, device, fingerprint)
+            self.app.call_from_thread(self._show_incoming_connection, device, fingerprint, status, old_fingerprint)
         except Exception:
             pass
         self._approve_event.wait(timeout=300)
@@ -360,7 +380,14 @@ class CreateScreen(Screen):
                 return
             session = self._listener.wait_for_client()
             if self._pending is not None:
-                device, fp = self._pending
+                # _pending is (device, fingerprint, status, old_fp).
+                # Keep the dial-back peer save separate from the
+                # host trusted client save, which HostListener
+                # already did after approval.
+                try:
+                    device, fp, _status, _old_fp = self._pending
+                except Exception:
+                    device, fp = self._pending[0], self._pending[1]
                 if self.config.peer_for(device) is None:
                     add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
             self.app.call_from_thread(self._set_status, "[bold #78DC8C]Connection accepted! Opening session...[/]")

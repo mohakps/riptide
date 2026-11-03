@@ -12,11 +12,13 @@
 ## How fingerprint trust works
 
 1. Each machine generates one self-signed RSA-2048 key and certificate on first run, in `~/.riptide/`. The certificate is valid for 10 years.
-2. On connect, each side computes the SHA-256 fingerprint of the other side certificate.
-3. On a first connection, the user sees that fingerprint and presses Allow to trust it. The fingerprint is then saved with the peer.
-4. On a later connection, if the fingerprint changed, the session aborts.
+2. On connect, each side computes the SHA-256 fingerprint of the other side certificate. The client side checks the host certificate directly from TLS. The host side, since v1.1, checks the client certificate through a signed hello challenge, because Python rejects self-signed TLS client certificates even with CERT_OPTIONAL: the client presents its certificate in hello, signs a host-chosen nonce with its private key, and the host verifies that signature against the presented certificate. The fingerprint is always computed from the certificate, never trusted from a string sent by the client.
+3. On a first connection, the user sees that fingerprint and presses Allow to trust it. The fingerprint is then saved with the peer. On the host side, the saved list is trusted clients, keyed by fingerprint, with the device name as a label only.
+4. On a later connection, if the fingerprint matches, the host shows Known peer. If the fingerprint changed for a known device, the host shows a warning and does not offer a plain Allow, it offers to replace the saved fingerprint only after the warning. If the client presents no certificate, or a bad signature, the host aborts before any approval prompt.
 
 TLS contexts use `CERT_NONE` at the library level, because Python built-in verification would reject a self-signed certificate outright. The real verification is the fingerprint check in Riptide itself.
+
+Breaking change in v1.1: a v1.1 host rejects a v1.0 client, because a v1.0 client cannot prove its fingerprint with a signed hello. Update both sides to v1.1. A v1.1 client can still talk to a v1.0 host, but that old host does not check the client fingerprint, so update the host side for full protection.
 
 ## Limits and risks
 

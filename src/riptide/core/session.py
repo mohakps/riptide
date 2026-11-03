@@ -11,8 +11,11 @@ No pairing code, no pairing listener, no SSH. Authentication is
 fingerprint-based, like SSH host keys:
 - the client checks the host certificate fingerprint, and
   presses Allow on first connect, or aborts if it changed;
-- the host sees the client device name and certificate
-  fingerprint, and presses Allow to accept the session.
+- since v1.1, the host also checks the client certificate
+  fingerprint, through a signed hello challenge, and presses
+  Allow on first connect, shows Known for a matching fingerprint,
+  or warns on a changed fingerprint. An empty client fingerprint
+  aborts, it never falls back to device-name-only approval.
 
 Framing: 4-byte big-endian length + JSON header, then, for a
 file message, exactly size bytes. A file is written to a .part
@@ -27,9 +30,12 @@ for a message it is supposed to read itself.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import inspect
 import ipaddress
 import json
+import os
 import socket
 import ssl
 import struct
@@ -37,7 +43,14 @@ import threading
 import time
 from pathlib import Path
 
-from .identity import cert_fingerprint, ensure_identity
+from .config import add_trusted_client, load_config
+from .identity import (
+    cert_der_from_pem,
+    cert_fingerprint,
+    ensure_identity,
+    sign_nonce,
+    verify_nonce_signature,
+)
 
 
 def parse_host_input(text: str) -> str:
@@ -135,6 +148,9 @@ class Session:
         self.peer_device = peer_device
         self.peer_host = peer_host
         self.peer_fingerprint = ""
+        # Host side only, set by HostListener: known, new, or changed.
+        self.client_trust_status = ""
+        self.client_old_fingerprint = ""
         self.on_file_received = on_file_received
         self.on_ack = on_ack
         self.on_error = on_error
@@ -385,10 +401,13 @@ def _server_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(cert_path), str(key_path))
     # CERT_NONE here, because a self-signed client cert would fail
-    # Python's built-in verification even with CERT_OPTIONAL.
-    # The strong check is the client checking the host
-    # server certificate fingerprint; the host approves the
-    # client by device name in the UI before the session opens.
+    # Python's built-in verification even with CERT_OPTIONAL, as
+    # verified in the v1.1 spike. Client authentication does not
+    # rely on TLS client certificates at all. It relies on the
+    # signed hello challenge in HostListener.wait_for_client:
+    # the client presents its certificate in hello, signs a
+    # host-chosen nonce with its private key, and the host
+    # verifies that signature against the presented certificate.
     ctx.verify_mode = ssl.CERT_NONE
     ctx.check_hostname = False
     return ctx
@@ -402,11 +421,47 @@ def _client_context(key_path: Path, cert_path: Path) -> ssl.SSLContext:
     return ctx
 
 
+def _approve_arity(approve) -> int:
+    """How many positional arguments an approve callback accepts.
+
+    Old callbacks take (device, fingerprint). New callbacks take
+    (device, fingerprint, status, old_fingerprint). Callbacks
+    with *args accept any count, so treat them as new.
+    """
+    try:
+        params = inspect.signature(approve).parameters.values()
+    except Exception:
+        return 2
+    for param in params:
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            return 4
+    count = sum(1 for p in params if p.kind in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ))
+    return count
+
+
+def _call_approve(approve, device: str, fingerprint: str, status: str, old_fingerprint: str) -> bool:
+    arity = _approve_arity(approve)
+    if arity >= 4:
+        return bool(approve(device, fingerprint, status, old_fingerprint))
+    if arity == 3:
+        return bool(approve(device, fingerprint, status))
+    return bool(approve(device, fingerprint))
+
+
 class HostListener:
     """Host side: listen for one client, approve it in the UI, return a Session.
 
-    approve(device, fingerprint) -> bool is called in the listener
-    thread; the UI must answer it (in tests it can auto-approve).
+    approve is called in the listener thread; the UI must answer
+    it (in tests it can auto-approve). Old callbacks take
+    (device, fingerprint). New callbacks take
+    (device, fingerprint, status, old_fingerprint), where status
+    is known, new, or changed. A changed fingerprint is only
+    passed to a new callback. An old callback never sees a
+    changed fingerprint, because that case aborts before approval,
+    so a plain Allow can never silently replace a saved fingerprint.
     """
 
     def __init__(self, port: int, cwd: Path, device: str, home: Path | None = None,
@@ -417,6 +472,17 @@ class HostListener:
         self.home = home
         self.approve = approve
         self._server_sock: socket.socket | None = None
+
+    def _abort(self, tls, message: str):
+        try:
+            _send_header(tls, {"type": "error", "message": message})
+        except Exception:
+            pass
+        try:
+            tls.close()
+        except Exception:
+            pass
+        raise ConnectionError(message)
 
     def wait_for_client(self, timeout: float | None = None) -> Session:
         key_path, cert_path = ensure_identity(self.home)
@@ -441,27 +507,98 @@ class HostListener:
         except Exception as exc:
             raise ConnectionError(f"TLS failed: {exc}") from exc
         _set_keepalive(tls)
-        # Client identity: its client cert, if presented.
-        peer_der = tls.getpeercert(binary_form=True)
-        peer_fp = cert_fingerprint(peer_der) if peer_der else ""
-        # Hello carries the client's device name.
-        raw_len = _recv_exact(tls, 4)
-        (length,) = struct.unpack(">I", raw_len)
-        hello = json.loads(_recv_exact(tls, length).decode())
+        # Signed hello challenge. The client must present its
+        # certificate in hello, then sign a host-chosen nonce.
+        # A client that presents no certificate, or a bad
+        # signature, aborts here, before any approval prompt.
+        # This is a breaking change from v1.0 on purpose: a v1.0
+        # client cannot be authenticated, so a v1.1 host must
+        # not accept it on device name alone.
+        try:
+            hello = _read_header(tls)
+        except Exception as exc:
+            try:
+                tls.close()
+            except Exception:
+                pass
+            raise ConnectionError(f"hello failed: {exc}") from exc
         client_device = str(hello.get("device", "")) or "client"
         dialled_host = str(hello.get("host", "")) or _addr[0]
-        if self.approve is not None and not self.approve(client_device, peer_fp):
+        cert_b64 = str(hello.get("cert", "") or "")
+        if not cert_b64:
+            self._abort(tls, "client fingerprint missing, cannot authenticate")
+        try:
+            cert_der = base64.b64decode(cert_b64, validate=True)
+            if not cert_der:
+                raise ValueError("empty certificate")
+            peer_fp = cert_fingerprint(cert_der)
+        except Exception:
+            self._abort(tls, "client certificate invalid")
+        nonce = os.urandom(32)
+        try:
+            _send_header(tls, {"type": "hello_challenge", "nonce": base64.b64encode(nonce).decode()})
+            proof = _read_header(tls)
+        except Exception as exc:
+            try:
+                tls.close()
+            except Exception:
+                pass
+            raise ConnectionError(f"hello challenge failed: {exc}") from exc
+        if proof.get("type") != "hello_proof":
+            self._abort(tls, "client signature verification failed")
+        try:
+            signature = base64.b64decode(str(proof.get("signature", "") or ""), validate=True)
+        except Exception:
+            self._abort(tls, "client signature verification failed")
+        if not verify_nonce_signature(cert_der, nonce, signature):
+            self._abort(tls, "client signature verification failed")
+        # Trust status, from trusted clients saved by this host.
+        try:
+            config = load_config(self.home)
+        except Exception:
+            config = None
+        status = "new"
+        old_fp = ""
+        if config is not None:
+            if config.trusted_client_for_fingerprint(peer_fp) is not None:
+                status = "known"
+            else:
+                by_device = config.trusted_client_for_device(client_device)
+                if by_device is not None:
+                    status = "changed"
+                    old_fp = by_device.fingerprint
+        if status == "changed" and (self.approve is None or _approve_arity(self.approve) < 3):
+            self._abort(tls, "fingerprint changed, session aborted")
+        if self.approve is not None and not _call_approve(self.approve, client_device, peer_fp, status, old_fp):
             try:
                 tls.close()
             except Exception:
                 pass
             raise ConnectionError("host denied the session")
+        # Save the trusted client only after approval. Known
+        # needs no save. New and changed, where the user pressed
+        # Accept after seeing the warning, are saved here, so a
+        # later connection is known, or the replaced fingerprint
+        # is the new trusted one.
+        if config is not None and status in ("new", "changed"):
+            try:
+                from .config import Peer
+
+                add_trusted_client(config, Peer(name=client_device, host="", fingerprint=peer_fp), home=self.home)
+            except Exception as exc:
+                try:
+                    tls.close()
+                except Exception:
+                    pass
+                raise ConnectionError(f"failed to save trusted client: {exc}") from exc
         try:
             _send_header(tls, {"type": "hello_ok", "device": self.device})
         except Exception as exc:
             raise ConnectionError(f"hello failed: {exc}") from exc
         session = Session(tls, self.cwd, device=self.device, peer_device=client_device, peer_host=dialled_host)
         session.peer_fingerprint = peer_fp
+        session.client_trust_status = status
+        session.client_old_fingerprint = old_fp
         return session
 
     def stop(self) -> None:
@@ -479,6 +616,12 @@ def join_session(host: str, port: int, cwd: Path, device: str,
 
     approve_fingerprint(fingerprint) -> bool is called when the
     fingerprint is unknown or changed; in the UI it is the Allow button.
+
+    After the host fingerprint check, the client proves its own
+    identity to a v1.1 host with a signed hello challenge. A v1.0
+    host replies hello_ok directly, without a challenge, and that
+    path still works, because the client side check is unchanged
+    and the old host simply never learns the client fingerprint.
     """
     key_path, cert_path = ensure_identity(home)
     ctx = _client_context(key_path, cert_path)
@@ -510,10 +653,30 @@ def join_session(host: str, port: int, cwd: Path, device: str,
                 pass
             raise ConnectionError("client denied the fingerprint")
     try:
-        _send_header(tls, {"type": "hello", "device": device, "host": host})
-        hello_ok = _read_header(tls)
-        if hello_ok.get("type") != "hello_ok":
+        try:
+            cert_b64 = base64.b64encode(cert_der_from_pem(cert_path)).decode()
+        except Exception:
+            cert_b64 = ""
+        _send_header(tls, {"type": "hello", "device": device, "host": host, "cert": cert_b64})
+        reply = _read_header(tls)
+        if reply.get("type") == "hello_ok":
+            hello_ok = reply
+        elif reply.get("type") == "error":
+            raise ConnectionError(f"host rejected: {reply.get('message', 'session rejected')}")
+        elif reply.get("type") != "hello_challenge":
             raise ConnectionError("host did not accept the session")
+        else:
+            try:
+                nonce = base64.b64decode(str(reply.get("nonce", "") or ""), validate=True)
+                signature = sign_nonce(key_path, nonce)
+            except Exception as exc:
+                raise ConnectionError(f"hello proof failed: {exc}") from exc
+            _send_header(tls, {"type": "hello_proof", "signature": base64.b64encode(signature).decode()})
+            hello_ok = _read_header(tls)
+            if hello_ok.get("type") == "error":
+                raise ConnectionError(f"host rejected: {hello_ok.get('message', 'session rejected')}")
+            if hello_ok.get("type") != "hello_ok":
+                raise ConnectionError("host did not accept the session")
     except Exception:
         try:
             tls.close()
