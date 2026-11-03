@@ -32,6 +32,40 @@ def cert_fingerprint(cert_der: bytes) -> str:
     return hashlib.sha256(cert_der).hexdigest()
 
 
+def fingerprint_code(fingerprint: str) -> str:
+    """6-digit code for a fingerprint, grouped as 123-456.
+
+    Since v1.3, this is the short form shown on approval popups
+    so two people can compare it out of band, by call or message,
+    instead of reading a full 64 hex character fingerprint aloud.
+    Derivation, exactly as in the security plan: take the first
+    3 bytes of the fingerprint, which is itself SHA-256 of the
+    certificate DER, convert to an integer, take modulo 1,000,000,
+    format with leading zeros, and group as 3 digits, dash, 3 digits.
+    The code is a Short Authentication String, not a TOTP code:
+    there is no shared secret on first connect, and the code does
+    not change over time. It has about 20 bits of entropy, so it
+    is much weaker than the full fingerprint, and the full
+    fingerprint stays available in the same popup for sensitive
+    transfers. An empty or invalid fingerprint returns ------,
+    so the UI never shows a fake code for a missing fingerprint.
+    """
+    try:
+        fp = (fingerprint or "").strip().lower()
+        if len(fp) < 6:
+            return "------"
+        value = int.from_bytes(bytes.fromhex(fp[:6]), "big") % 1000000
+        code = f"{value:06d}"
+        return f"{code[:3]}-{code[3:]}"
+    except Exception:
+        return "------"
+
+
+def fingerprint_code_from_cert_der(cert_der: bytes) -> str:
+    """6-digit code for a certificate, via its fingerprint."""
+    return fingerprint_code(cert_fingerprint(cert_der))
+
+
 def cert_der_from_pem(cert_path: Path) -> bytes:
     """Return the DER bytes for a PEM certificate file."""
     from cryptography import x509

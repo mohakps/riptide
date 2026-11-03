@@ -19,6 +19,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
+from ..core.identity import cert_der_from_pem, cert_fingerprint, ensure_identity, fingerprint_code
 from ..core.nat import public_ip
 from ..core.session import HostListener
 from ..theme import BANNER_CREATE
@@ -79,6 +80,7 @@ class CreateScreen(Screen):
             ),
             Vertical(
                 Static("Your public address: checking…", id="public_ip"),
+                Static("My code: checking…", id="my_code"),
                 Static(
                     f"[dim]○[/] [bold #E8E8E8]Waiting for client on port {self.config.session_port}...[/]\n\n"
                     f"[dim]Share your IP or hostname with the client to initiate connection.[/]",
@@ -230,6 +232,34 @@ class CreateScreen(Screen):
         except Exception:
             pass
 
+    def _update_my_code(self, code: str | None) -> None:
+        try:
+            if code:
+                self.query_one("#my_code", Static).update(
+                    f"My code: [bold #FFD166]{code}[/]"
+                )
+            else:
+                self.query_one("#my_code", Static).update(
+                    "[dim]My code: could not be determined[/]"
+                )
+        except Exception:
+            pass
+
+    def _fetch_my_code(self) -> None:
+        # Local identity only, no network. Shown on the Create
+        # page at all times, so the host can answer when the
+        # dialler asks, is your code XXX-XXX, without needing
+        # a connection first.
+        try:
+            _key, cert_path = ensure_identity()
+            code = fingerprint_code(cert_fingerprint(cert_der_from_pem(cert_path)))
+        except Exception:
+            code = None
+        try:
+            self.app.call_from_thread(self._update_my_code, code)
+        except Exception:
+            pass
+
     def _set_allow_visible(self, visible: bool) -> None:
         try:
             actions = self.query_one("#create_actions", Horizontal)
@@ -265,28 +295,31 @@ class CreateScreen(Screen):
             card.add_class("active")
             if fingerprint:
                 fp_text = f"\n[dim]Fingerprint: {fingerprint[:32]}...[/]"
+                code_text = f"\n[bold #FFD166]Peer code: {fingerprint_code(fingerprint)}[/]"
             else:
                 # This should not happen in v1.1, because an empty
                 # client fingerprint aborts before approval. Show
                 # it explicitly if it ever does, instead of hiding it.
                 fp_text = "\n[bold #FF6B6B]Fingerprint: missing, cannot authenticate[/]"
+                code_text = "\n[bold #FF6B6B]Peer code: ------[/]"
             if status == "known":
                 status_text = "\n[bold #78DC8C]Known peer: fingerprint matches saved[/]"
                 question = "Accept connection from this known peer?"
             elif status == "changed":
                 old_text = f"\n[dim]Old fingerprint: {old_fingerprint[:32]}...[/]" if old_fingerprint else ""
+                old_code_text = f"\n[dim]Old peer code: {fingerprint_code(old_fingerprint)}[/]" if old_fingerprint else ""
                 status_text = (
                     "\n[bold #FF6B6B]WARNING: Fingerprint changed for this device[/]"
-                    f"{old_text}"
+                    f"{old_text}{old_code_text}"
                     "\n[#E8E8E8]Accept only if this peer reinstalled Riptide or deleted its identity. Accepting here replaces the saved fingerprint.[/]"
                 )
                 question = "Replace saved fingerprint and accept?"
             else:
-                status_text = "\n[bold #FFD166]New peer: first time, check fingerprint before Accept[/]"
+                status_text = "\n[bold #FFD166]New peer: first time, compare peer code with the peer out of band before Accept[/]"
                 question = "Accept connection from this peer?"
             msg = (
                 f"[bold #78DC8C]● INCOMING CONNECTION REQUEST[/]\n\n"
-                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}{status_text}\n\n"
+                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}{code_text}{status_text}\n\n"
                 f"[#E8E8E8]{question}[/]"
             )
             self.query_one("#incoming", Static).update(msg)
@@ -351,6 +384,7 @@ class CreateScreen(Screen):
         self._set_allow_visible(False)
         # Public IP, same timing, so the client has something to dial.
         threading.Thread(target=self._fetch_public_ip, daemon=True).start()
+        threading.Thread(target=self._fetch_my_code, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
         if self.port_was_closed:
             self._show_router_banner()

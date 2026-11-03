@@ -26,8 +26,34 @@ from textual.widgets import Button, Input, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
 from ..core.focus import focus_first
+from ..core.identity import fingerprint_code
 from ..core.session import join_session, parse_host_input
 from ..theme import BANNER_JOIN
+
+
+def join_fingerprint_body(fingerprint: str) -> str:
+    """Body text for the Join fingerprint approval popup.
+
+    Shows the 6-digit host code prominently first, then a short
+    out-of-band comparison note, then the full fingerprint.
+    The code is not a secret and does not replace the full
+    fingerprint for sensitive transfers, and that is said in
+    the popup itself, not just in the docs.
+    """
+    code = fingerprint_code(fingerprint) if fingerprint else "------"
+    first, rest = fingerprint[:32], fingerprint[32:]
+    if fingerprint:
+        fp_text = f"Fingerprint:\n[bold #FFFFFF]{first}\n{rest}[/]"
+    else:
+        fp_text = "[bold #FF6B6B]Fingerprint: missing, cannot authenticate[/]"
+    return (
+        f"Host code: [bold #FFD166]{code}[/]\n\n"
+        f"[dim #A1A1AA]Compare this code with the host out of band, "
+        f"by call or message, before Allow. The code is a short form "
+        f"of the fingerprint below, not a secret.[/]\n\n"
+        f"{fp_text}\n\n"
+        f"[dim #A1A1AA]Allow to trust this host?[/]"
+    )
 
 
 def friendly_dial_error(exc: Exception, port: int) -> str:
@@ -253,11 +279,9 @@ class JoinScreen(Screen):
         # Show the full fingerprint, split across two lines so it
         # fits the 60-wide modal card instead of wrapping out of
         # view. The first line alone is not enough to trust on.
-        first, rest = fingerprint[:32], fingerprint[32:]
-        body = (
-            f"Fingerprint:\n[bold #FFFFFF]{first}\n{rest}[/]\n\n"
-            f"[dim #A1A1AA]Allow to trust this host?[/]"
-        )
+        # Since v1.3, the 6-digit host code is shown first, so
+        # the two people can compare it out of band.
+        body = join_fingerprint_body(fingerprint)
         try:
             self.app.call_from_thread(
                 self.query_one("#fingerprint_modal_body", Static).update, body
