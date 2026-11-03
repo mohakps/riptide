@@ -136,6 +136,38 @@ def _send_header(sock, header: dict) -> None:
     sock.sendall(struct.pack(">I", len(raw)) + raw)
 
 
+def unique_final_path(cwd: Path, name: str) -> Path | None:
+    """Pick a final path that does not overwrite an existing file.
+
+    Since v1.2, a received file never silently overwrites. If
+    ``name`` already exists in ``cwd``, try ``name (1).ext``,
+    then ``name (2).ext``, and so on, up to 1000. The extension
+    is the last suffix, so ``archive.tar.gz`` becomes
+    ``archive.tar (1).gz``, and a dotfile ``.bashrc`` becomes
+    ``.bashrc (1)``. An incoming name that already ends in
+    `` (1)`` is treated literally, so it becomes `` (1) (1)``
+    if that name is also taken, which keeps the rule simple
+    and predictable. A symlink counts as existing, so a symlink
+    is never replaced. Returns None after 1000 taken names.
+    Empty, dot, and dot-dot names return the original path,
+    so the caller fails as before instead of inventing a name.
+    """
+    cwd = Path(cwd)
+    if not name or name in (".", ".."):
+        return cwd / name
+    base = Path(name).name
+    stem = Path(base).stem
+    suffix = Path(base).suffix
+    candidate = cwd / base
+    if not (candidate.exists() or candidate.is_symlink()):
+        return candidate
+    for i in range(1, 1001):
+        candidate = cwd / f"{stem} ({i}){suffix}"
+        if not (candidate.exists() or candidate.is_symlink()):
+            return candidate
+    return None
+
+
 class Session:
     def __init__(self, sock, cwd: Path, device: str = "", peer_device: str = "",
                  peer_host: str = "",
@@ -354,22 +386,76 @@ class Session:
                 self.on_file_received(name, False, "incomplete")
             return
         ok = digest.hexdigest() == expected
+        saved_name = name
+        rename_reason = ""
         if ok:
-            try:
-                part.replace(final)
-            except Exception:
+            # Never silently overwrite. Pick a free name, re-check
+            # just before the rename, and if a file appeared in
+            # that window, pick the next free name. The old
+            # fallback that unlinked the target and replaced it
+            # is removed on purpose, it was the overwrite bug.
+            if not name or name in (".", ".."):
                 try:
-                    final.unlink(missing_ok=True)
                     part.replace(final)
+                    saved_name = name
                 except Exception as exc:
                     ok = False
+                    rename_reason = f"rename failed: {exc}"
                     if self.on_error is not None:
-                        self.on_error(f"rename failed: {exc}")
+                        self.on_error(rename_reason)
+            else:
+                for _attempt in range(1001):
+                    unique = unique_final_path(self.cwd, name)
+                    if unique is None:
+                        ok = False
+                        rename_reason = "too many duplicates"
+                        break
+                    if unique.exists() or unique.is_symlink():
+                        continue
+                    try:
+                        part.replace(unique)
+                        saved_name = unique.name
+                        break
+                    except Exception as exc:
+                        # If the target appeared between check and
+                        # rename, try the next free name. Any other
+                        # error is a real rename failure.
+                        if unique.exists() or unique.is_symlink():
+                            continue
+                        ok = False
+                        rename_reason = f"rename failed: {exc}"
+                        if self.on_error is not None:
+                            self.on_error(rename_reason)
+                        break
+                else:
+                    ok = False
+                    rename_reason = "too many duplicates"
+            # On a rename failure, the .part file is kept as in
+            # v1.1. Section 5 changes .part cleanup on failed
+            # transfers, it is not bundled into this section.
         if self.on_file_received is not None:
-            self.on_file_received(name, ok, "" if ok else "SHA-256 mismatch, kept as .part")
+            if ok:
+                # On rename, tell the UI the original name, so
+                # it can show "saved as X, original Y already
+                # existed" instead of just the saved name.
+                if saved_name != name:
+                    self.on_file_received(saved_name, True, f"renamed from {name}")
+                else:
+                    self.on_file_received(saved_name, True, "")
+            elif digest.hexdigest() != expected:
+                self.on_file_received(name, False, "SHA-256 mismatch, kept as .part")
+            else:
+                self.on_file_received(name, False, rename_reason or "rename failed")
         # Ack is a normal message, not a file, so it cannot interleave
         # with file bytes: file bytes are already fully read here.
-        self.send_ack(name, ok, "" if ok else "SHA-256 mismatch")
+        # On success, the ack carries the actual saved name, so
+        # the sender learns that the file was renamed to (1), (2), etc.
+        if ok:
+            self.send_ack(saved_name, True, "")
+        elif digest.hexdigest() != expected:
+            self.send_ack(name, False, "SHA-256 mismatch")
+        else:
+            self.send_ack(name, False, rename_reason or "rename failed")
 
 
     def close(self) -> None:

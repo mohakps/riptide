@@ -29,7 +29,7 @@ The name comes from Minecraft. Riptide is the trident enchantment that launches 
 - Fingerprint approval. First connection to a peer shows its certificate fingerprint for approval. A changed fingerprint later aborts the session.
 - Public address display on Create Server.
 
-Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, so only approve sessions for peers you trust. Full detail is in [Docs/Security](docs/security.md).
+Security, in brief: TLS protects files in transit. Fingerprints authenticate peers. Download requests need explicit approval. Private keys stay in `~/.riptide/` at 0600 and are never stored in `config.toml`. Files on disk are not encrypted. A push after session approval does not ask per file, but it never overwrites, duplicates are saved as (1), (2), etc., so only approve sessions for peers you trust. Full detail is in [Docs/Security](docs/security.md).
 
 ## Installation
 

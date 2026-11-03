@@ -160,6 +160,8 @@ class SessionScreen(Screen):
         self._complete_timer = None
         self._complete_message_kind: str | None = None
         self._received_files: list[str] = []
+        # Saved name -> original name, for files renamed to (1), (2), etc.
+        self._renamed_files: dict[str, str] = {}
         self._last_received_at: float = 0.0
 
     # -- header & connection display ----------------------------------
@@ -587,11 +589,20 @@ class SessionScreen(Screen):
                 # the rest, with ... if it does not.
                 trunc_name = _truncate_filename(self._received_files[0], max(12, content_width - 30))
                 text = f'Received file "{trunc_name}" successfully.'
+                orig = self._renamed_files.get(self._received_files[0])
+                if orig:
+                    trunc_orig = _truncate_filename(orig, max(12, content_width - 30))
+                    text += f' (original "{trunc_orig}" already existed).'
             else:
                 lines = [f"Received {len(self._received_files)} files:"]
                 for name in self._received_files:
                     trunc_name = _truncate_filename(name, max(12, content_width - 2))
-                    lines.append(f"• {trunc_name}")
+                    orig = self._renamed_files.get(name)
+                    if orig:
+                        trunc_orig = _truncate_filename(orig, max(12, content_width - 2))
+                        lines.append(f"• {trunc_name} (was {trunc_orig})")
+                    else:
+                        lines.append(f"• {trunc_name}")
                 text = "\n".join(lines)
             msg = self.query_one("#transfer_complete_message", Static)
             msg.update(text)
@@ -640,6 +651,7 @@ class SessionScreen(Screen):
             # Sent message as a normal send. Previously respond_download
             # sent with no progress callback, so the approver saw nothing.
             self._received_files = []
+            self._renamed_files = {}
             threading.Thread(target=lambda: self._send_approved_download(name, rid), daemon=True).start()
         else:
             threading.Thread(target=lambda: self.session.respond_download(name, rid, False), daemon=True).start()
@@ -689,7 +701,10 @@ class SessionScreen(Screen):
         now = time.monotonic()
         if self._last_received_at and now - self._last_received_at > 10:
             self._received_files = []
+            self._renamed_files = {}
         self._last_received_at = now
+        if reason.startswith("renamed from "):
+            self._renamed_files[name] = reason[len("renamed from "):]
         if name not in self._received_files:
             self._received_files.append(name)
         self._show_received_message()
@@ -826,6 +841,7 @@ class SessionScreen(Screen):
             return
         # A new user-started send ends any previous received batch.
         self._received_files = []
+        self._renamed_files = {}
         files = list(self.selection)
         self.selection = []
         # Set transfer-active before refreshing, so the download
@@ -880,6 +896,7 @@ class SessionScreen(Screen):
             return
         # A new download request ends any previous received batch.
         self._received_files = []
+        self._renamed_files = {}
         self._set_status(f"Waiting for peer approval for {name}...")
         ok = self.session.request_download(name, request_id=str(uuid.uuid4()))
         if not ok:
