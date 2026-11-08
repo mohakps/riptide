@@ -173,7 +173,8 @@ class Session:
                  peer_host: str = "",
                  on_file_received=None, on_ack=None, on_error=None,
                  on_progress=None,
-                 on_download_ask=None, on_download_denied=None):
+                 on_download_ask=None, on_download_denied=None,
+                 on_disconnect=None):
         self.sock = sock
         self.cwd = Path(cwd)
         self.device = device
@@ -189,10 +190,34 @@ class Session:
         self.on_progress = on_progress
         self.on_download_ask = on_download_ask
         self.on_download_denied = on_download_denied
+        # Called exactly once when the session ends, cleanly or not:
+        # the peer sent bye, or the reader hit an error. The UI uses
+        # it to return to the Create/Join screen. It is separate
+        # from on_error because on_error also fires for non-fatal
+        # events, like a failed file receive, which must not end
+        # the session.
+        self.on_disconnect = on_disconnect
+        # Set when the reader has exited, so a waiter (the Create
+        # screen worker) can tell the session is over without
+        # polling.
+        self._ended = threading.Event()
         self._send_lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
+
+    def wait_ended(self, timeout: float | None = None) -> bool:
+        """Block until the reader has exited, i.e. the session is over."""
+        return self._ended.wait(timeout)
+
+    def _notify_disconnect(self, message: str) -> None:
+        # One call for both the message and the lifecycle: the UI
+        # learns the session ended, and the session screen can
+        # return to the Create/Join screen.
+        if self.on_error is not None:
+            self.on_error(message)
+        if self.on_disconnect is not None:
+            self.on_disconnect()
 
     # -- sending -------------------------------------------------
     def send_file(self, path: Path, on_progress=None) -> bool:
@@ -339,15 +364,21 @@ class Session:
                 elif kind == "pong":
                     pass
                 elif kind == "bye":
+                    # The peer disconnected cleanly. Tell the UI,
+                    # exactly like a failed read does, otherwise
+                    # the session dies silently and the screen
+                    # keeps showing connected.
+                    self._notify_disconnect("peer disconnected")
                     break
                 elif kind == "error":
                     if self.on_error is not None:
                         self.on_error(str(header.get("message", "")))
         except Exception as exc:
-            if self._running and self.on_error is not None:
-                self.on_error(f"session ended: {exc}")
+            if self._running:
+                self._notify_disconnect(f"session ended: {exc}")
         finally:
             self._running = False
+            self._ended.set()
 
     def _receive_file(self, header: dict) -> None:
         name = Path(str(header.get("name", ""))).name

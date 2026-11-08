@@ -428,6 +428,7 @@ class SessionScreen(Screen):
             self._set_status, f"Received ack for {name}: {'verified' if ok else 'FAILED ' + reason}"
         )
         self.session.on_error = lambda msg: self.app.call_from_thread(self._on_session_error, msg)
+        self.session.on_disconnect = lambda: self.app.call_from_thread(self._on_session_disconnect)
         self.session.on_progress = lambda name, received, total: self.app.call_from_thread(
             self._on_progress, name, received, total, received, total, "Receiving"
         )
@@ -455,6 +456,23 @@ class SessionScreen(Screen):
         self._connection_state = "disconnected"
         self._set_status(msg)
         self._update_header()
+
+    def _on_session_disconnect(self) -> None:
+        # The session is over: the peer sent bye, or the read
+        # failed. Close our side and return to the Create/Join
+        # screen, where the host listener is re-armed and waiting
+        # for the next peer. Only pop when this screen is still on
+        # top, so a Leave pressed at the same moment cannot pop
+        # the screen underneath as well.
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        try:
+            if self.app.screen is self:
+                self.app.pop_screen()
+        except Exception:
+            pass
 
     def _set_download_approval_visible(self, visible: bool) -> None:
         try:
