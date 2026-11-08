@@ -67,3 +67,36 @@ def test_dropped_connection_notifies_host_disconnect(tmp_path):
     assert host_errors[0].startswith("session ended:")
     assert len(host_disconnects) == 1
     host_session["s"].close()
+
+
+def test_listener_stop_frees_port(tmp_path):
+    # Regression test: stop() used to only close() the server
+    # socket, which does not wake a thread blocked in accept(), so
+    # the worker stayed blocked and the port stayed bound, and the
+    # next Create Server page failed to bind with EADDRINUSE.
+    # shutdown() wakes accept() at once.
+    import socket
+
+    port = _free_port()
+    listener = HostListener(port, tmp_path / "host", device="host", home=tmp_path / "home", approve=lambda d, fp: True)
+    errors = []
+
+    def wait():
+        try:
+            listener.wait_for_client()
+        except Exception as exc:  # noqa: BLE001 - collected, asserted below
+            errors.append(exc)
+
+    t = threading.Thread(target=wait, daemon=True)
+    t.start()
+    time.sleep(0.5)
+    listener.stop()
+    t.join(timeout=5)
+    assert not t.is_alive(), "wait_for_client did not return after stop()"
+    # The port must be bindable again straight away.
+    probe = socket.socket()
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("127.0.0.1", port))
+    finally:
+        probe.close()

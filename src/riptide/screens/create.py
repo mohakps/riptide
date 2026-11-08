@@ -405,38 +405,59 @@ class CreateScreen(Screen):
                 pass
 
     def _worker(self) -> None:
-        try:
-            self._listener = HostListener(
-                self.config.session_port, self.cwd, device=socket.gethostname(),
-                approve=self._approve,
-            )
-            if self._stopped.is_set():
-                return
-            session = self._listener.wait_for_client()
-            if self._pending is not None:
-                # _pending is (device, fingerprint, status, old_fp).
-                # Keep the dial-back peer save separate from the
-                # host trusted client save, which HostListener
-                # already did after approval.
-                try:
-                    device, fp, _status, _old_fp = self._pending
-                except Exception:
-                    device, fp = self._pending[0], self._pending[1]
-                if self.config.peer_for(device) is None:
-                    add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
-            self.app.call_from_thread(self._set_status, "[bold #78DC8C]Connection accepted! Opening session...[/]")
-            from .session_screen import SessionScreen
-            self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "host"))
-        except Exception as exc:
-            # Do not overwrite an incoming-connection card that is
-            # already on screen; a worker failure cannot happen while
-            # an approval is pending in the real flow.
-            if self._awaiting_approval:
-                return
+        # Listen for clients until the screen is left. After each
+        # session ends, listen again, so a peer can rejoin without
+        # restarting Create Server. A denied peer still stops the
+        # listener, as before: denying is a deliberate stop, while
+        # a session ending is not.
+        while not self._stopped.is_set():
             try:
-                self.app.call_from_thread(self._set_status, f"[bold #FF6B6B]Failed: {exc}[/]")
-            except Exception:
-                pass
+                self._pending = None
+                self._listener = HostListener(
+                    self.config.session_port, self.cwd, device=socket.gethostname(),
+                    approve=self._approve,
+                )
+                if self._stopped.is_set():
+                    return
+                session = self._listener.wait_for_client()
+                if self._pending is not None:
+                    # _pending is (device, fingerprint, status, old_fp).
+                    # Keep the dial-back peer save separate from the
+                    # host trusted client save, which HostListener
+                    # already did after approval.
+                    try:
+                        device, fp, _status, _old_fp = self._pending
+                    except Exception:
+                        device, fp = self._pending[0], self._pending[1]
+                    if self.config.peer_for(device) is None:
+                        add_peer(self.config, Peer(name=device, host=device, fingerprint=fp))
+                self.app.call_from_thread(self._set_status, "[bold #78DC8C]Connection accepted! Opening session...[/]")
+                from .session_screen import SessionScreen
+                self.app.call_from_thread(self.app.push_screen, SessionScreen(session, "host"))
+                # The session runs on its own screen. Wait here until
+                # it ends, then listen again.
+                while not session.wait_ended(timeout=0.5):
+                    if self._stopped.is_set():
+                        return
+                if self._stopped.is_set():
+                    return
+                self.app.call_from_thread(
+                    self._set_status,
+                    f"[dim]Peer disconnected.[/] [bold #E8E8E8]Waiting for client on port {self.config.session_port}...[/]",
+                )
+            except Exception as exc:
+                # Do not overwrite an incoming-connection card that is
+                # already on screen; a worker failure cannot happen while
+                # an approval is pending in the real flow.
+                if self._awaiting_approval:
+                    return
+                if self._stopped.is_set():
+                    return
+                try:
+                    self.app.call_from_thread(self._set_status, f"[bold #FF6B6B]Failed: {exc}[/]")
+                except Exception:
+                    pass
+                return
 
     async def on_key(self, event) -> None:
         if event.key == "escape":

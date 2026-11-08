@@ -719,11 +719,21 @@ class HostListener:
         return session
 
     def stop(self) -> None:
+        # shutdown() first: close() alone does not wake a thread
+        # blocked in accept(), so the worker would stay blocked and
+        # the port stayed bound, and the next Create Server page in
+        # the same process failed to bind with EADDRINUSE. shutdown()
+        # wakes accept() at once, and close() then frees the socket.
         if self._server_sock is not None:
+            try:
+                self._server_sock.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
             try:
                 self._server_sock.close()
             except Exception:
                 pass
+            self._server_sock = None
 
 
 def join_session(host: str, port: int, cwd: Path, device: str,
