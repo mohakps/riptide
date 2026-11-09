@@ -36,6 +36,7 @@ import inspect
 import ipaddress
 import json
 import os
+import select
 import socket
 import ssl
 import struct
@@ -588,7 +589,7 @@ class HostListener:
         self.device = device
         self.home = home
         self.approve = approve
-        self._server_sock: socket.socket | None = None
+        self._server_socks: list[socket.socket] = []
 
     def _abort(self, tls, message: str):
         try:
@@ -601,24 +602,88 @@ class HostListener:
             pass
         raise ConnectionError(message)
 
+    def _create_listener_sockets(self, port: int) -> list[socket.socket]:
+        """Listening sockets covering IPv4 and IPv6 on `port`.
+
+        Preferred: one dual-stack AF_INET6 socket (IPV6_V6ONLY=0)
+        that accepts both families on the same port, so an IPv6
+        client dialling the host's global address reaches us. If
+        the host refuses a dual-stack socket but still has IPv6,
+        one socket per family instead. If the host has no IPv6 at
+        all, a single IPv4 socket, exactly as before.
+        """
+        try:
+            server = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            try:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                server.bind(("::", port))
+                server.listen(1)
+            except Exception:
+                server.close()
+                raise
+            return [server]
+        except Exception:
+            pass
+        sockets: list[socket.socket] = []
+        last_exc: Exception | None = None
+        for family, addr in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+            try:
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                sock.bind((addr, port))
+                sock.listen(1)
+                sockets.append(sock)
+            except Exception as exc:  # noqa: BLE001 - retried per family, raised below
+                last_exc = exc
+        if not sockets:
+            raise OSError(f"could not bind a listener on port {port}") from last_exc
+        return sockets
+
+    def _accept_one(self, servers: list[socket.socket], timeout: float | None) -> tuple:
+        """Accept one connection from any of `servers`, honouring `timeout`.
+
+        select() waits on all of them at once. stop() shutting the
+        sockets down wakes it (select raises, or accept raises on a
+        stopped socket), so leaving the Create screen still releases
+        the port at once, as it did for the single-socket accept().
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        candidates = list(servers)
+        while candidates:
+            remaining = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("timed out")
+            readable, _, _ = select.select(candidates, [], [], remaining)
+            if not readable:
+                raise socket.timeout("timed out")
+            for server in readable:
+                try:
+                    return server.accept()
+                except OSError:
+                    # A stopped socket: drop it and keep waiting on
+                    # the rest; if none are left, the listener is gone.
+                    candidates.remove(server)
+        raise OSError("listener stopped")
+
     def wait_for_client(self, timeout: float | None = None) -> Session:
         key_path, cert_path = ensure_identity(self.home)
         ctx = _server_context(key_path, cert_path)
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("0.0.0.0", self.port))
-        server.listen(1)
-        if timeout is not None:
-            server.settimeout(timeout)
-        self._server_sock = server
+        servers = self._create_listener_sockets(self.port)
+        self._server_socks = servers
         try:
-            raw, _addr = server.accept()
+            raw, _addr = self._accept_one(servers, timeout)
         finally:
-            try:
-                server.close()
-            except Exception:
-                pass
-            self._server_sock = None
+            for server in servers:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+            self._server_socks = []
         try:
             tls = ctx.wrap_socket(raw, server_side=True)
         except Exception as exc:
@@ -640,7 +705,13 @@ class HostListener:
                 pass
             raise ConnectionError(f"hello failed: {exc}") from exc
         client_device = str(hello.get("device", "")) or "client"
-        dialled_host = str(hello.get("host", "")) or _addr[0]
+        # On a dual-stack socket an IPv4 peer arrives as an
+        # IPv4-mapped IPv6 address (::ffff:192.168.1.6); unwrap it
+        # so the saved peer address stays a plain IPv4 address.
+        peer_ip = _addr[0]
+        if peer_ip.startswith("::ffff:"):
+            peer_ip = peer_ip[7:]
+        dialled_host = str(hello.get("host", "")) or peer_ip
         cert_b64 = str(hello.get("cert", "") or "")
         if not cert_b64:
             self._abort(tls, "client fingerprint missing, cannot authenticate")
@@ -720,20 +791,21 @@ class HostListener:
 
     def stop(self) -> None:
         # shutdown() first: close() alone does not wake a thread
-        # blocked in accept(), so the worker would stay blocked and
-        # the port stayed bound, and the next Create Server page in
-        # the same process failed to bind with EADDRINUSE. shutdown()
-        # wakes accept() at once, and close() then frees the socket.
-        if self._server_sock is not None:
+        # blocked in accept() or select(), so the worker would stay
+        # blocked and the port stayed bound, and the next Create
+        # Server page in the same process failed to bind with
+        # EADDRINUSE. shutdown() wakes both at once, and close()
+        # then frees the socket.
+        for server in list(self._server_socks):
             try:
-                self._server_sock.shutdown(socket.SHUT_RDWR)
+                server.shutdown(socket.SHUT_RDWR)
             except Exception:
                 pass
             try:
-                self._server_sock.close()
+                server.close()
             except Exception:
                 pass
-            self._server_sock = None
+        self._server_socks = []
 
 
 def join_session(host: str, port: int, cwd: Path, device: str,
