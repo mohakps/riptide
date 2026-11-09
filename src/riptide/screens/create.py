@@ -20,7 +20,7 @@ from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
 from ..core.identity import cert_der_from_pem, cert_fingerprint, ensure_identity, fingerprint_code
-from ..core.nat import public_ip
+from ..core.nat import public_ip, public_ipv6
 from ..core.session import HostListener
 from ..theme import BANNER_CREATE
 
@@ -80,6 +80,7 @@ class CreateScreen(Screen):
             ),
             Vertical(
                 Static("Your public address: checking…", id="public_ip"),
+                Static("Your IPv6 address: checking…", id="public_ipv6"),
                 Static("My code: checking…", id="my_code"),
                 Static(
                     f"[dim]○[/] [bold #E8E8E8]Waiting for client on port {self.config.session_port}...[/]\n\n"
@@ -222,13 +223,31 @@ class CreateScreen(Screen):
         except Exception:
             pass
 
+    def _update_public_ipv6(self, ip: str | None) -> None:
+        # Shown only when the host has a public IPv6 address; with
+        # none, the row hides instead of showing a dead line.
+        try:
+            widget = self.query_one("#public_ipv6", Static)
+            if ip:
+                widget.styles.display = "block"
+                widget.update(f"Your IPv6 address: [bold #FF6B6B]{ip}[/]")
+            else:
+                widget.styles.display = "none"
+        except Exception:
+            pass
+
     def _fetch_public_ip(self) -> None:
         try:
             ip = public_ip()
         except Exception:
             ip = None
         try:
+            ip6 = public_ipv6()
+        except Exception:
+            ip6 = None
+        try:
             self.app.call_from_thread(self._update_public_ip, ip)
+            self.app.call_from_thread(self._update_public_ipv6, ip6)
         except Exception:
             pass
 
