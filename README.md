@@ -33,12 +33,18 @@ Security, in brief: TLS protects files in transit. Fingerprints authenticate pee
 
 ## Installation
 
-GitHub only. Riptide is not published to PyPI.
+Published on PyPI as `riptide-transfer`. The command stays `riptide`.
 
-Requirements: Python 3.11 or newer, `pipx`, `git`, Windows or Linux.
+Requirements: Python 3.11 or newer, Windows or Linux. For the GitHub install you also need `git`.
 
 ```sh
-pipx install git+https://github.com/mohakps/riptide
+pip install riptide-transfer
+```
+
+Or install from GitHub:
+
+```sh
+pip install git+https://github.com/mohakps/riptide
 ```
 
 Run it from the folder you want to send from or receive into:
@@ -50,13 +56,13 @@ riptide
 Update:
 
 ```sh
-pipx upgrade riptide
+pip install --upgrade riptide-transfer
 ```
 
 Uninstall:
 
 ```sh
-pipx uninstall riptide
+pip uninstall riptide-transfer
 ```
 
 If upgrade fails, uninstall and install again.

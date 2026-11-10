@@ -14,9 +14,14 @@ def _load_version() -> str:
             pass
     try:
         from importlib.metadata import version
-        return version("riptide")
+        for dist_name in ("riptide-transfer", "riptide"):
+            try:
+                return version(dist_name)
+            except Exception:
+                continue
     except Exception:
-        return "0.0.0"
+        pass
+    return "0.0.0"
 
 
 __version__ = _load_version()

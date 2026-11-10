@@ -62,20 +62,20 @@ The Join side normally needs no port forward and no inbound firewall rule, becau
 Update:
 
 ```sh
-pipx upgrade riptide
+pip install --upgrade riptide-transfer
 ```
 
 If upgrade fails:
 
 ```sh
-pipx uninstall riptide
-pipx install git+https://github.com/mohakps/riptide
+pip uninstall riptide-transfer
+pip install riptide-transfer
 ```
 
 Uninstall the program:
 
 ```sh
-pipx uninstall riptide
+pip uninstall riptide-transfer
 ```
 
 Uninstall does not delete `~/.riptide/`. Delete that folder yourself for a clean start. That also deletes your TLS identity, so peers will see a new fingerprint next time.
