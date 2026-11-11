@@ -105,6 +105,57 @@ def windows_block_rule_exists(port: int) -> bool:
         return False
 
 
+def windows_riptide_rule_exists() -> bool:
+    """True if any rule named Riptide exists on Windows, enabled or not."""
+    if get_os() != "windows":
+        return False
+    try:
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", "name=Riptide"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if res.returncode != 0 or not isinstance(res.stdout, str):
+            return False
+        return any(
+            rule.get("rule name") == "riptide"
+            for rule in _parse_netsh_rules(res.stdout)
+        )
+    except Exception:
+        return False
+
+
+def windows_riptide_rule_profile(port: int) -> str | None:
+    """The Profiles value of the enabled Riptide allow rule, or None.
+
+    Returns the lowercased value, for example "private,public"
+    or "any", for the enabled inbound allow rule named Riptide
+    that covers the port. None when there is no such rule, or
+    not on Windows. Used by the Create page to tell the user an
+    old all-profile rule can be replaced by running
+    riptide --cleanup and then Create Server again.
+    """
+    if get_os() != "windows":
+        return None
+    try:
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", "name=Riptide"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if res.returncode != 0 or not isinstance(res.stdout, str):
+            return None
+        for rule in _parse_netsh_rules(res.stdout):
+            if rule.get("rule name") != "riptide":
+                continue
+            if rule.get("action") != "allow":
+                continue
+            if not _windows_rule_matches(rule, port):
+                continue
+            return rule.get("profiles")
+        return None
+    except Exception:
+        return None
+
+
 def check_firewall_port(port: int) -> bool:
     """Check if the given port is open in the OS firewall.
 
@@ -202,7 +253,11 @@ def open_firewall_port(port: int, rule_name: str = "Riptide") -> bool:
     if os_name == "windows":
         try:
             # Single-word rule name: a name with spaces was fragile
-            # in netsh argument parsing.
+            # in netsh argument parsing. Profile is Private and
+            # Public only, never Domain: most WiFi is Public by
+            # default, so Private-only would break normal use,
+            # while a Domain rule would open the port on a
+            # corporate domain network by default.
             cmd = [
                 "netsh", "advfirewall", "firewall", "add", "rule",
                 f"name={rule_name}",
@@ -210,18 +265,21 @@ def open_firewall_port(port: int, rule_name: str = "Riptide") -> bool:
                 "action=allow",
                 "protocol=TCP",
                 f"localport={port}",
+                "profile=private,public",
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if res.returncode == 0:
                 return True
             # Add fails when a rule with that name already exists,
             # which is exactly the case when the user turned the
-            # rule off instead of deleting it. Enable it instead.
+            # rule off instead of deleting it. Enable it instead,
+            # and narrow its profile at the same time, so an old
+            # all-profile rule becomes Private, Public.
             for name in (rule_name,):
                 res = subprocess.run(
                     [
                         "netsh", "advfirewall", "firewall", "set", "rule",
-                        f"name={name}", "new", "enable=yes",
+                        f"name={name}", "new", "enable=yes", "profile=private,public",
                     ],
                     capture_output=True, text=True, timeout=10,
                 )
@@ -287,7 +345,8 @@ def manual_firewall_command(port: int) -> str:
     if os_name == "windows":
         return (
             f"netsh advfirewall firewall add rule name=Riptide "
-            f"dir=in action=allow protocol=TCP localport={port}"
+            f"dir=in action=allow protocol=TCP localport={port} "
+            "profile=private,public"
         )
     if os_name == "linux":
         if shutil.which("ufw"):
@@ -409,11 +468,12 @@ def elevated_open_firewall_port_windows(port: int, poll_timeout: float = 30) -> 
     if not _valid_port(port):
         return "failed"
     if _windows_riptide_rule_disabled():
-        parameters = "advfirewall firewall set rule name=Riptide new enable=yes"
+        parameters = "advfirewall firewall set rule name=Riptide new enable=yes profile=private,public"
     else:
         parameters = (
             "advfirewall firewall add rule name=Riptide "
-            f"dir=in action=allow protocol=TCP localport={port}"
+            f"dir=in action=allow protocol=TCP localport={port} "
+            "profile=private,public"
         )
     result = _shell_execute_runas(_netsh_path(), parameters)
     if result in (1223, 5):
@@ -423,14 +483,14 @@ def elevated_open_firewall_port_windows(port: int, poll_timeout: float = 30) -> 
     return "opened" if _poll_firewall_open(port, timeout=poll_timeout) else "failed"
 
 
-def _pkexec_run(cmd: list[str]) -> int:
+def _pkexec_run_output(cmd: list[str]) -> tuple[int, str]:
     """Run one command as root on Linux, via pkexec.
 
-    Returns the program return code, 126 if the user dismissed
-    the authentication dialog, or 127 if pkexec is missing, no
-    authentication agent is available, or authorisation failed.
-    Those codes are from the pkexec manual. The
-    --disable-internal-agent flag is deliberate: without it,
+    Returns (return code, combined stdout and stderr). 126 if the
+    user dismissed the authentication dialog, 127 if pkexec is
+    missing, no authentication agent is available, or
+    authorisation failed. Those codes are from the pkexec manual.
+    The --disable-internal-agent flag is deliberate: without it,
     pkexec would register its own textual agent and prompt for
     a password in the terminal, which would fight the Textual
     UI the same way plain sudo did. With the flag, a machine
@@ -438,15 +498,155 @@ def _pkexec_run(cmd: list[str]) -> int:
     and the caller falls back to the manual command.
     """
     if not shutil.which("pkexec"):
-        return 127
+        return 127, ""
     try:
         res = subprocess.run(
             ["pkexec", "--disable-internal-agent", *cmd],
             capture_output=True, text=True, timeout=120,
         )
-        return res.returncode
+        return res.returncode, (res.stdout or "") + (res.stderr or "")
     except Exception:
-        return 127
+        return 127, ""
+
+
+def _pkexec_run(cmd: list[str]) -> int:
+    """Run one command as root on Linux, via pkexec.
+
+    Returns the program return code, 126 if the user dismissed
+    the authentication dialog, or 127 if pkexec is missing, no
+    authentication agent is available, or authorisation failed.
+    Those codes are from the pkexec manual.
+    """
+    return _pkexec_run_output(cmd)[0]
+
+
+def _poll_firewall_closed(port: int, timeout: float = 30, interval: float = 0.5) -> bool:
+    """Poll check_firewall_port until the port is closed or the timeout ends.
+
+    Used after an elevated delete, because ShellExecuteW returns
+    before netsh has run. The inverse of _poll_firewall_open.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if not check_firewall_port(port):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
+def remove_firewall_port(port: int) -> str:
+    """Remove the Riptide port rule, with elevation if needed.
+
+    Returns "removed", "not_found", "failed", or "cancelled".
+    "not_found" means no Riptide rule existed, so nothing was
+    done. "cancelled" means the user dismissed the elevation
+    prompt. Tries the plain path first (root, or passwordless
+    sudo on Linux), then the elevation prompt, so no prompt
+    appears when it is not needed. The caller (riptide --cleanup)
+    deletes nothing else when this returns "cancelled" or
+    "failed", and proceeds when it returns "removed" or
+    "not_found".
+    """
+    if not _valid_port(port):
+        return "failed"
+    os_name = get_os()
+    if os_name == "windows":
+        return _remove_firewall_port_windows(port)
+    if os_name == "linux":
+        return _remove_firewall_port_linux(port)
+    return "not_found"
+
+
+def _netsh_delete_rule() -> tuple[int, str]:
+    """Run netsh delete rule name=Riptide directly, return (rc, output)."""
+    try:
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=Riptide"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return res.returncode, (res.stdout or "") + (res.stderr or "")
+    except Exception:
+        return 1, ""
+
+
+def _remove_firewall_port_windows(port: int) -> str:
+    if not windows_riptide_rule_exists():
+        return "not_found"
+    if is_elevated():
+        rc, out = _netsh_delete_rule()
+        if rc == 0:
+            return "removed"
+        if "no rules match" in out.lower():
+            return "not_found"
+        return "failed"
+    result = _shell_execute_runas(
+        _netsh_path(), "advfirewall firewall delete rule name=Riptide"
+    )
+    if result in (1223, 5):
+        return "cancelled"
+    if result <= 32:
+        return "failed"
+    return "removed" if _poll_firewall_closed(port) else "failed"
+
+
+def _remove_firewall_port_linux(port: int) -> str:
+    # Pick the first tool found, mirroring the add order. The
+    # not-found markers are the tool's own words for a rule that
+    # does not exist, so a missing rule reports "not_found"
+    # instead of an error.
+    if shutil.which("ufw"):
+        cmd = ["ufw", "delete", "allow", f"{port}/tcp"]
+        markers = ("non-existent",)
+    elif shutil.which("firewall-cmd"):
+        # Presence check first: --query-port works as a normal
+        # user, so a missing rule reports "not_found" with no
+        # prompt and no delete attempt.
+        try:
+            query = subprocess.run(
+                ["firewall-cmd", "--permanent", f"--query-port={port}/tcp"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            return "failed"
+        if query.returncode != 0:
+            return "not_found"
+        cmd = [
+            "/bin/sh", "-c",
+            f"firewall-cmd --permanent --remove-port={port}/tcp "
+            "&& firewall-cmd --reload",
+        ]
+        markers: tuple[str, ...] = ()
+    elif shutil.which("iptables"):
+        cmd = ["iptables", "-D", "INPUT", "-p", "tcp", "--dport", str(port), "-j", "ACCEPT"]
+        markers = ("bad rule",)
+    elif shutil.which("nft"):
+        cmd = ["nft", "delete", "rule", "inet", "filter", "input", "tcp", "dport", str(port), "accept"]
+        markers = ("no such file or directory",)
+    else:
+        return "not_found"
+    # Plain first: sudo -n, then the bare command (works as
+    # root). A failure here is not a failure yet: it falls
+    # through to pkexec, unless the tool itself says the rule
+    # does not exist.
+    for full in (["sudo", "-n", *cmd], cmd):
+        try:
+            res = subprocess.run(full, capture_output=True, text=True, timeout=10)
+        except Exception:
+            continue
+        out = (res.stdout or "") + (res.stderr or "")
+        if res.returncode == 0:
+            return "removed"
+        if any(m in out.lower() for m in markers):
+            return "not_found"
+    rc, out = _pkexec_run_output(cmd)
+    if rc == 126:
+        return "cancelled"
+    if rc == 0:
+        return "removed"
+    if any(m in out.lower() for m in markers):
+        return "not_found"
+    return "failed"
 
 
 def elevated_open_firewall_port_linux(port: int) -> str:

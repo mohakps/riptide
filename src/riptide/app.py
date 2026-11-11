@@ -30,12 +30,28 @@ def build_parser() -> argparse.ArgumentParser:
         description="Direct, encrypted PC-to-PC file transfer in the terminal.",
     )
     parser.add_argument("--version", action="version", version=f"riptide {__version__}")
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove the firewall rule, delete the local identity and saved peers, then exit.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="With --cleanup, skip the confirmation prompt. Destructive.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.yes and not args.cleanup:
+        parser.error("--yes needs --cleanup")
+    if args.cleanup:
+        from .core.cleanup import run_cleanup
+
+        return run_cleanup(yes=args.yes)
     app = RiptideApp()
     app.run()
     return 0

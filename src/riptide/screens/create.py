@@ -148,6 +148,31 @@ class CreateScreen(Screen):
         except Exception:
             pass
 
+    def _show_profile_note(self) -> None:
+        """Show the note for an old all-profile firewall rule.
+
+        The port is open, but the rule covers all profiles,
+        including Domain. Replacing it with a Private, Public
+        rule needs riptide --cleanup first, which also deletes
+        the identity and saved peers, so the note says so.
+        """
+        try:
+            banner = self.query_one("#router_banner", Static)
+            port = self.config.session_port
+            self._firewall_banner_kind = "profile"
+            banner.update(
+                f"Firewall: port {port} is open on all profiles, including Domain. "
+                f"To replace it with a Private, Public rule, run `riptide --cleanup` "
+                f"(this also deletes your identity and saved peers), then click Create Server again."
+            )
+            banner.styles.display = "block"
+            try:
+                self.query_one("#router_banner_spacer", Static).styles.display = "block"
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _set_firewall_banner(self, opened: bool) -> None:
         self.port_was_closed = True
         self.firewall_opened = opened
@@ -407,6 +432,17 @@ class CreateScreen(Screen):
         threading.Thread(target=self._worker, daemon=True).start()
         if self.port_was_closed:
             self._show_router_banner()
+        else:
+            # The port is open, but an old all-profile rule may
+            # still be in place. Show the note so it can be
+            # replaced with a Private, Public rule.
+            try:
+                from ..core.firewall import windows_riptide_rule_profile
+
+                if windows_riptide_rule_profile(self.config.session_port) in ("any", "all"):
+                    self._show_profile_note()
+            except Exception:
+                pass
         # Re-check while waiting, so turning the rule off after
         # clicking Create Server still warns and tries to open it.
         threading.Thread(target=self._firewall_watch, daemon=True).start()
