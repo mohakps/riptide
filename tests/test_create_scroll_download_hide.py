@@ -57,8 +57,8 @@ class _SessionApp(App):
         self.push_screen(SessionScreen(self._session, "host"))
 
 
-def test_version_is_1_5_0():
-    assert __version__ == "1.5.0"
+def test_version_is_1_5_1():
+    assert __version__ == "1.5.1"
 
 
 @pytest.mark.asyncio

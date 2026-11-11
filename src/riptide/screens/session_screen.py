@@ -39,6 +39,7 @@ from ..core.file_select import (
     total_size,
 )
 from ..core.focus import focus_first, handle_arrow_key
+from ..core.markup import esc
 from ..core.resume import RESUME_DECISION_TIMEOUT, pending_for_peer, remove_pending
 from ..core.session import Session
 from ..core.transfer import TransferProgress, format_bytes as fmt_bytes, format_eta
@@ -49,6 +50,9 @@ def _build_file_item(path: Path, selected: bool, is_focused: bool = False, max_n
     display, size, mtime = format_browser_row(path)
     if max_name_chars is not None:
         display = _truncate_filename(display, max_name_chars)
+    # A local file can be named [red]evil[/red] too, so the name
+    # is escaped before it reaches the Label's markup parser.
+    display = esc(display)
     item = ListItem(
         Horizontal(
             Label("❯ " if is_focused else "  ", classes="file-pointer"),
@@ -199,8 +203,8 @@ class SessionScreen(Screen):
             display_target = peer_addr or peer_host or "unknown"
 
         if peer_name and peer_name != display_target:
-            return f"{peer_label}: [bold #FFFFFF]{peer_name}[/] [dim]({display_target})[/]"
-        return f"{peer_label}: [bold #FFFFFF]{display_target}[/]"
+            return f"{peer_label}: [bold #FFFFFF]{esc(peer_name)}[/] [dim]({esc(display_target)})[/]"
+        return f"{peer_label}: [bold #FFFFFF]{esc(display_target)}[/]"
 
     def _format_status_indicator(self) -> str:
         if self._connection_state == "connected":
@@ -316,13 +320,14 @@ class SessionScreen(Screen):
             find_width = len(f"Find: {self._search_query}▌") + 1
             path_max = max(12, self._content_width() - find_width - 3)
             trunc_dir = _truncate_filename(str(self.browser_dir), path_max)
-            self.query_one("#browser_path", Static).update(f"📁 {trunc_dir}")
+            self.query_one("#browser_path", Static).update(f"📁 {esc(trunc_dir)}")
             # Find label is always visible at the right corner of the
             # file-selection box header, with the typed text in white
             # and a blinking cursor, even when the query is empty.
+            # The query is user-typed, so it is escaped too.
             cursor = "▌" if getattr(self, "_find_cursor_visible", True) else " "
             self.query_one("#browser_search_indicator", Static).update(
-                f"[#E8E8E8]Find:[/] [bold #FFFFFF]{self._search_query}[/][bold #FF6B6B]{cursor}[/]"
+                f"[#E8E8E8]Find:[/] [bold #FFFFFF]{esc(self._search_query)}[/][bold #FF6B6B]{cursor}[/]"
             )
         except Exception:
             pass
@@ -358,7 +363,7 @@ class SessionScreen(Screen):
             ),
             Vertical(
                 Horizontal(
-                    Static(f"📁 {self.browser_dir}", id="browser_path"),
+                    Static(f"📁 {esc(self.browser_dir)}", id="browser_path"),
                     Static("Find: ▌", id="browser_search_indicator"),
                     id="browser_header_row",
                 ),
@@ -645,11 +650,11 @@ class SessionScreen(Screen):
                 # around the name, so the name itself must fit in
                 # the rest, with ... if it does not.
                 trunc_name = _truncate_filename(self._received_files[0], max(12, content_width - 30))
-                text = f'Received file "{trunc_name}" successfully.'
+                text = f'Received file "{esc(trunc_name)}" successfully.'
                 orig = self._renamed_files.get(self._received_files[0])
                 if orig:
                     trunc_orig = _truncate_filename(orig, max(12, content_width - 30))
-                    text += f' (original "{trunc_orig}" already existed).'
+                    text += f' (original "{esc(trunc_orig)}" already existed).'
             else:
                 lines = [f"Received {len(self._received_files)} files:"]
                 for name in self._received_files:
@@ -657,9 +662,9 @@ class SessionScreen(Screen):
                     orig = self._renamed_files.get(name)
                     if orig:
                         trunc_orig = _truncate_filename(orig, max(12, content_width - 2))
-                        lines.append(f"• {trunc_name} (was {trunc_orig})")
+                        lines.append(f"• {esc(trunc_name)} (was {esc(trunc_orig)})")
                     else:
-                        lines.append(f"• {trunc_name}")
+                        lines.append(f"• {esc(trunc_name)}")
                 text = "\n".join(lines)
             msg = self.query_one("#transfer_complete_message", Static)
             msg.update(text)
@@ -683,7 +688,7 @@ class SessionScreen(Screen):
             card_content = max(12, min(56, self._screen_width() - 8))
             trunc_name = _truncate_filename(name, card_content)
             self.query_one("#download_approval", Static).update(
-                f"Peer wants to download:\n[bold #FFFFFF]{trunc_name}[/]\n\n"
+                f"Peer wants to download:\n[bold #FFFFFF]{esc(trunc_name)}[/]\n\n"
                 f"[dim #A1A1AA]Allow to send it, Deny to refuse.[/]"
             )
         except Exception:
@@ -739,9 +744,12 @@ class SessionScreen(Screen):
         # and transfer progress is shown in the progress section.
         # Keep the last message in memory for debugging/tests, and
         # do not crash if the old #status widget is gone.
+        # The displayed text is escaped: status messages include
+        # file names, device names, and error text, and a name
+        # containing Rich markup must show literally.
         self._last_status = text
         try:
-            self.query_one("#status", Static).update(f"Status: {text}")
+            self.query_one("#status", Static).update(f"Status: {esc(text)}")
         except Exception:
             pass
 
@@ -802,7 +810,7 @@ class SessionScreen(Screen):
             prefix = f"{direction}: "
             name_max = max(12, self._content_width() - len(prefix) - len(size_text))
             trunc_name = _truncate_filename(name, name_max)
-            self.query_one("#progress_file_name", Label).update(f"{prefix}{trunc_name}")
+            self.query_one("#progress_file_name", Label).update(f"{prefix}{esc(trunc_name)}")
             self.query_one("#progress_file_size", Label).update(size_text)
         except Exception:
             pass
@@ -831,7 +839,7 @@ class SessionScreen(Screen):
                 path_max = max(12, self._content_width() - 2 - size_plain_len)
                 trunc_path = _truncate_filename(str(p.resolve()), path_max)
                 selected_container.mount(
-                    Static(f"[bold #FF6B6B]• {trunc_path}[/]{dim_size}", classes="selected-file-item")
+                    Static(f"[bold #FF6B6B]• {esc(trunc_path)}[/]{dim_size}", classes="selected-file-item")
                 )
         except Exception:
             pass
@@ -912,7 +920,7 @@ class SessionScreen(Screen):
             trunc_name = _truncate_filename(name, card_content)
             percent = (offset * 100 // size) if size else 0
             self.query_one("#resume_approval", Static).update(
-                f"Resume interrupted transfer:\n[bold #FFFFFF]{trunc_name}[/]\n"
+                f"Resume interrupted transfer:\n[bold #FFFFFF]{esc(trunc_name)}[/]\n"
                 f"[dim #A1A1AA]{format_bytes(offset)} of {format_bytes(size)} already here ({percent}%).[/]\n\n"
                 f"[dim #A1A1AA]Resume to continue from where it stopped, Deny to delete the partial file.[/]"
             )
@@ -1080,7 +1088,7 @@ class SessionScreen(Screen):
             msg = self.query_one("#download_denied_message", Static)
             # "✗ Peer denied download request for " is 36 chars.
             trunc_name = _truncate_filename(name, max(12, self._content_width() - 36))
-            msg.update(f"✗ Peer denied download request for {trunc_name}")
+            msg.update(f"✗ Peer denied download request for {esc(trunc_name)}")
             msg.add_class("active")
             msg.styles.display = "block"
         except Exception:

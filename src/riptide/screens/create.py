@@ -20,6 +20,7 @@ from textual.widgets import Button, Label, Static
 
 from ..core.config import Peer, add_peer, load_config
 from ..core.identity import cert_der_from_pem, cert_fingerprint, ensure_identity, fingerprint_code
+from ..core.markup import esc
 from ..core.nat import public_ip, public_ipv6
 from ..core.session import HostListener
 from ..theme import BANNER_CREATE
@@ -239,7 +240,7 @@ class CreateScreen(Screen):
         try:
             if ip:
                 self.query_one("#public_ip", Static).update(
-                    f"Your public address: [bold #FF6B6B]{ip}[/]"
+                    f"Your public address: [bold #FF6B6B]{esc(ip)}[/]"
                 )
             else:
                 self.query_one("#public_ip", Static).update(
@@ -255,7 +256,7 @@ class CreateScreen(Screen):
             widget = self.query_one("#public_ipv6", Static)
             if ip:
                 widget.styles.display = "block"
-                widget.update(f"Your IPv6 address: [bold #FF6B6B]{ip}[/]")
+                widget.update(f"Your IPv6 address: [bold #FF6B6B]{esc(ip)}[/]")
             else:
                 widget.styles.display = "none"
         except Exception:
@@ -280,7 +281,7 @@ class CreateScreen(Screen):
         try:
             if code:
                 self.query_one("#my_code", Static).update(
-                    f"My code: [bold #FFD166]{code}[/]"
+                    f"My code: [bold #FFD166]{esc(code)}[/]"
                 )
             else:
                 self.query_one("#my_code", Static).update(
@@ -363,7 +364,7 @@ class CreateScreen(Screen):
                 question = "Accept connection from this peer?"
             msg = (
                 f"[bold #78DC8C]● INCOMING CONNECTION REQUEST[/]\n\n"
-                f"Peer Device: [bold #FFFFFF]{device}[/]{fp_text}{code_text}{status_text}\n\n"
+                f"Peer Device: [bold #FFFFFF]{esc(device)}[/]{fp_text}{code_text}{status_text}\n\n"
                 f"[#E8E8E8]{question}[/]"
             )
             self.query_one("#incoming", Static).update(msg)

@@ -27,6 +27,7 @@ from textual.widgets import Button, Input, Label, Static
 from ..core.config import Peer, add_peer, load_config
 from ..core.focus import focus_first
 from ..core.identity import fingerprint_code
+from ..core.markup import esc
 from ..core.session import join_session, parse_host_input
 from ..theme import BANNER_JOIN
 
@@ -95,7 +96,7 @@ class SavedDevicesList(Vertical):
     def compose(self) -> ComposeResult:
         for i, peer in enumerate(self.peers):
             text = peer.name if peer.name and peer.name != peer.host else peer.host
-            yield Static(f"• {text}", id=f"device_item_{i}", classes="device-item")
+            yield Static(f"• {esc(text)}", id=f"device_item_{i}", classes="device-item")
 
     @property
     def selected_device(self) -> Peer | None:
@@ -118,9 +119,9 @@ class SavedDevicesList(Vertical):
                 st = self.query_one(f"#device_item_{i}", Static)
                 text = peer.name if peer.name and peer.name != peer.host else peer.host
                 if is_focused and i == self.selected_index:
-                    st.update(f"[bold #FF6B6B]• {text}[/]")
+                    st.update(f"[bold #FF6B6B]• {esc(text)}[/]")
                 else:
-                    st.update(f"[#D7D7D7]• {text}[/]")
+                    st.update(f"[#D7D7D7]• {esc(text)}[/]")
             except Exception:
                 pass
 
@@ -258,8 +259,12 @@ class JoinScreen(Screen):
                     pass
 
     def _set_status(self, text: str) -> None:
+        # The displayed status is escaped: it includes the host
+        # the user typed and dial error text, and a host containing
+        # Rich markup must show literally. The peer-status label
+        # is fixed markup, so it stays as-is.
         try:
-            self.query_one("#status", Static).update(f"Status: {text}")
+            self.query_one("#status", Static).update(f"Status: {esc(text)}")
             lower = text.lower()
             if "dial" in lower:
                 self.query_one("#peer_status_label", Static).update("[#E8E8E8]Dialling[/] [bold #FFD166]○[/]")
