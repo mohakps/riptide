@@ -821,6 +821,76 @@ ProgressBar > .bar--bar {
     margin: 1 0 0 0;
 }
 
+#resume_modal_overlay {
+    layer: overlay;
+    display: none;
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+}
+#resume_modal_overlay.active {
+    display: block;
+}
+#resume_modal_card {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    border: none;
+    background: #3F3F46;
+    padding: 1 2;
+    align: center middle;
+}
+#resume_modal_title {
+    width: 100%;
+    text-align: center;
+    color: #FFD166;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
+#resume_modal_card #resume_approval {
+    width: 100%;
+    text-align: center;
+    color: #E8E8E8;
+    margin: 0 0 1 0;
+}
+#resume_modal_actions {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    margin: 1 0;
+}
+#resume_modal_actions Button {
+    margin: 0 2;
+    min-width: 16;
+}
+#resume_modal_actions Button.allow {
+    background: #78DC8C;
+    color: #121212;
+    text-style: bold;
+}
+#resume_modal_actions Button.allow:focus {
+    background: #8EEC9F;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#resume_modal_actions Button.deny {
+    background: #FF6B6B;
+    color: #121212;
+    text-style: bold;
+}
+#resume_modal_actions Button.deny:focus {
+    background: #FF8787;
+    color: #000000;
+    border: tall #FFFFFF;
+}
+#resume_modal_footer {
+    width: 100%;
+    text-align: center;
+    color: #71717A;
+    margin: 1 0 0 0;
+}
+
 #footer_bar {
     dock: bottom;
     width: 100%;

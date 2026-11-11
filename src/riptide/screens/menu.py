@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
@@ -8,6 +10,7 @@ from textual.widgets.option_list import Option
 
 from .. import __version__
 from ..core.focus import focus_first, handle_arrow_key
+from ..core.resume import cleanup_parts
 from ..theme import HEADER_BANNER, TAGLINES
 
 
@@ -86,6 +89,12 @@ class MenuScreen(Screen):
             pass
 
     def on_mount(self) -> None:
+        # A .part older than 1 day can no longer be resumed, so
+        # it is deleted at app launch, in the launch folder.
+        try:
+            cleanup_parts(Path.cwd())
+        except Exception:
+            pass
         try:
             self.query_one("#menu_list", OptionList).focus()
         except Exception:

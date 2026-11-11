@@ -43,6 +43,10 @@ A download request name can be absolute on the peer, for example `/home/friend/r
 
 Progress shows for the batch and for the current file: speed, transferred total, remaining size, and ETA, plus a progress bar. Speed is measured from spaced reports, at most every 0.1 seconds, plus the final chunk. This avoids the burst artefact where queued UI callbacks made speed read 4 to 5 times too high.
 
+## Resume interrupted transfers
+
+If a transfer is interrupted, the receiver keeps the partial `.part` file, and the sender re-sends it automatically when the same peer reconnects. The receiver shows a resume card with how much is already here; Allow continues from where it stopped, Deny deletes the partial file. A partial file is also deleted if you connect to a different peer, or after 1 day, and a failed hash check deletes it too. The sender's pending transfers are saved in `~/.riptide/pending.json`, so the auto-resume works even after the sender restarts the app.
+
 ## Saved connections
 
 Peers you connect to are saved in `~/.riptide/config.toml`, on Windows in the `.riptide` folder under your home directory. Each saved peer stores name, hostname, and certificate fingerprint. It never stores a private key.

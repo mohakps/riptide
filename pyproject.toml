@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riptide-transfer"
-version = "1.4.5"
+version = "1.5.0"
 description = "Direct, encrypted PC-to-PC file transfer in the terminal. No cloud upload, no website in the data path."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -52,6 +52,23 @@ from .identity import (
     sign_nonce,
     verify_nonce_signature,
 )
+from .resume import (
+    RESUME_DECISION_TIMEOUT,
+    RESUME_RESPONSE_TIMEOUT,
+    add_pending,
+    cleanup_parts,
+    delete_part_and_sidecar,
+    is_stale_sidecar,
+    part_sidecar_path,
+    read_part_sidecar,
+    remove_pending,
+    write_part_sidecar,
+)
+
+# Capability advertised in hello and hello_ok. A peer that does
+# not advertise it is an old client, and gets a plain full
+# transfer with no resume negotiation.
+RESUME_CAPABILITY = "resume"
 
 
 def parse_host_input(text: str) -> str:
@@ -175,14 +192,27 @@ class Session:
                  on_file_received=None, on_ack=None, on_error=None,
                  on_progress=None,
                  on_download_ask=None, on_download_denied=None,
-                 on_disconnect=None):
+                 on_disconnect=None, home: Path | None = None):
         self.sock = sock
         self.cwd = Path(cwd)
+        self.home = home
         self.device = device
         self.peer_device = peer_device
         self.peer_host = peer_host
         self.peer_fingerprint = ""
-        # Host side only, set by HostListener: known, new, or changed.
+        # True when the peer advertised the resume capability in
+        # hello / hello_ok. An old peer gets a plain full transfer.
+        self.peer_supports_resume = False
+        # Called by _receive_file when a matching .part exists for
+        # the file now arriving. Returns "allow", "deny", or
+        # "timeout". The UI implements it with the resume card.
+        self.on_resume_ask = None
+        # Resume response state, set by the reader loop when a
+        # "resume" or "resume_denied" message arrives, read by
+        # send_file while it waits for the receiver's answer.
+        self._resume_event = threading.Event()
+        self._resume_offset = 0
+        self._resume_denied = False
         self.client_trust_status = ""
         self.client_old_fingerprint = ""
         self.on_file_received = on_file_received
@@ -221,6 +251,35 @@ class Session:
             self.on_disconnect()
 
     # -- sending -------------------------------------------------
+    def _record_pending(self, path: Path, size: int, digest_hex: str) -> None:
+        """Record an interrupted transfer for auto-resume on rejoin.
+
+        The receiver may already hold a .part for this file, so
+        the sender re-sends the header when the same peer
+        reconnects, and the receiver resumes from its .part.
+        The entry is saved to disk, so it survives an app restart.
+        """
+        if not self.peer_fingerprint:
+            return
+        try:
+            add_pending(self.home, {
+                "peer_fingerprint": self.peer_fingerprint,
+                "name": path.name,
+                "size": size,
+                "sha256": digest_hex,
+                "path": str(path),
+            })
+        except Exception:
+            pass
+
+    def _clear_pending(self, path: Path, size: int, digest_hex: str) -> None:
+        if not self.peer_fingerprint:
+            return
+        try:
+            remove_pending(self.home, self.peer_fingerprint, path.name, size, digest_hex)
+        except Exception:
+            pass
+
     def send_file(self, path: Path, on_progress=None) -> bool:
         path = Path(path)
         if not path.is_file():
@@ -230,13 +289,44 @@ class Session:
         with open(path, "rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 256), b""):
                 digest.update(chunk)
-        header = {"type": "file", "name": path.name, "size": size, "sha256": digest.hexdigest()}
+        digest_hex = digest.hexdigest()
+        header = {"type": "file", "name": path.name, "size": size, "sha256": digest_hex}
+        offset = 0
+        header_sent = False
         with self._send_lock:
             try:
                 _send_header(self.sock, header)
-                sent = 0
+                header_sent = True
+                if self.peer_supports_resume:
+                    # Wait for the receiver's resume answer before
+                    # sending any bytes. It replies with the offset
+                    # to resume from, 0 for a fresh transfer, or
+                    # resume_denied when the user refused the resume.
+                    # The reader loop delivers the answer through
+                    # _resume_event, so the wait never blocks the
+                    # reader. The receiver decides within 30s and
+                    # the sender waits 60s, so a slow decision
+                    # reaches the sender as a denial, not a timeout.
+                    self._resume_event.clear()
+                    self._resume_denied = False
+                    self._resume_offset = 0
+                    if not self._resume_event.wait(timeout=RESUME_RESPONSE_TIMEOUT):
+                        if self.on_error is not None:
+                            self.on_error("resume timed out")
+                        self._record_pending(path, size, digest_hex)
+                        return False
+                    if self._resume_denied:
+                        self._clear_pending(path, size, digest_hex)
+                        if self.on_error is not None:
+                            self.on_error("resume denied")
+                        return False
+                    offset = self._resume_offset
+                    if offset < 0 or offset > size:
+                        offset = 0
+                sent = offset
                 last_report = 0.0
                 with open(path, "rb") as handle:
+                    handle.seek(offset)
                     while True:
                         chunk = handle.read(1024 * 128)
                         if not chunk:
@@ -254,6 +344,8 @@ class Session:
                         # at most every 0.1s, plus always on the final
                         # chunk, so the UI time between reports is real
                         # network time, not queue-processing time.
+                        # Progress starts at the resume offset, so the
+                        # UI shows total progress, not just this attempt.
                         now = time.monotonic()
                         if on_progress is not None and (now - last_report >= 0.1 or sent >= size):
                             last_report = now
@@ -261,7 +353,11 @@ class Session:
             except Exception as exc:
                 if self.on_error is not None:
                     self.on_error(f"send failed: {exc}")
+                if header_sent:
+                    self._record_pending(path, size, digest_hex)
                 return False
+        # The send completed: the transfer is no longer pending.
+        self._clear_pending(path, size, digest_hex)
         return True
 
 
@@ -314,6 +410,14 @@ class Session:
     def start(self) -> None:
         if self._running:
             return
+        # A .part from another peer, or older than 1 day, can no
+        # longer be resumed, so it is deleted now, before any
+        # transfer in this session. The peer fingerprint is known
+        # by now, from the hello handshake.
+        try:
+            cleanup_parts(self.cwd, self.peer_fingerprint or None)
+        except Exception:
+            pass
         _set_keepalive(self.sock)
         self._running = True
         self._thread = threading.Thread(target=self._reader, daemon=True)
@@ -346,6 +450,21 @@ class Session:
                 kind = header.get("type")
                 if kind == "file":
                     self._receive_file(header)
+                elif kind == "resume":
+                    # The receiver's answer to a file header: the
+                    # offset to resume from, 0 for a fresh transfer.
+                    # Delivered to send_file, which is waiting on it.
+                    try:
+                        self._resume_offset = int(header.get("offset", 0))
+                    except Exception:
+                        self._resume_offset = 0
+                    self._resume_event.set()
+                elif kind == "resume_denied":
+                    # The receiver refused the resume, or the
+                    # decision timed out. send_file aborts and
+                    # clears the pending entry.
+                    self._resume_denied = True
+                    self._resume_event.set()
                 elif kind == "download_ask":
                     if self.on_download_ask is not None:
                         self.on_download_ask(str(header.get("name", "")), str(header.get("id", "")))
@@ -381,18 +500,118 @@ class Session:
             self._running = False
             self._ended.set()
 
+    def _send_resume_reply(self, kind: str, name: str, offset: int = 0) -> None:
+        """Send a resume or resume_denied message to the sender."""
+        with self._send_lock:
+            try:
+                if kind == "resume":
+                    _send_header(self.sock, {"type": "resume", "offset": offset, "name": name})
+                else:
+                    _send_header(self.sock, {"type": "resume_denied", "name": name})
+            except Exception:
+                pass
+
+    def _resolve_resume_offset(self, header: dict) -> int:
+        """Resolve the resume offset for an incoming file header.
+
+        Returns the byte offset to resume from, 0 for a fresh
+        transfer. A .part that does not match the header (wrong
+        peer, wrong file, sender's file changed, stale, or no
+        sidecar) is deleted, and 0 is returned.
+        """
+        name = Path(str(header.get("name", ""))).name
+        size = int(header.get("size", 0))
+        expected = str(header.get("sha256", ""))
+        part = self.cwd / f"{name}.part"
+        if not part.exists():
+            return 0
+        sidecar = read_part_sidecar(part)
+        if sidecar is None:
+            delete_part_and_sidecar(part)
+            return 0
+        if (
+            sidecar.get("peer_fingerprint") != self.peer_fingerprint
+            or sidecar.get("name") != name
+            or int(sidecar.get("size", -1)) != size
+            or sidecar.get("sha256") != expected
+        ):
+            delete_part_and_sidecar(part)
+            return 0
+        if is_stale_sidecar(sidecar):
+            delete_part_and_sidecar(part)
+            return 0
+        current = part.stat().st_size
+        if current > size:
+            delete_part_and_sidecar(part)
+            return 0
+        return current
+
     def _receive_file(self, header: dict) -> None:
         name = Path(str(header.get("name", ""))).name
         size = int(header.get("size", 0))
         expected = str(header.get("sha256", ""))
         part = self.cwd / f"{name}.part"
         final = self.cwd / name
+        offset = self._resolve_resume_offset(header)
+        # A complete .part is verified locally. On a match, the
+        # sender is told to resume from the end (it sends nothing)
+        # and the file is renamed below. On a mismatch, the .part
+        # is corrupt, so it is deleted and the file starts fresh.
+        if offset == size and size > 0:
+            probe = hashlib.sha256()
+            try:
+                with open(part, "rb") as existing:
+                    for chunk in iter(lambda: existing.read(1024 * 256), b""):
+                        probe.update(chunk)
+            except Exception:
+                probe = hashlib.sha256(b"")
+            if probe.hexdigest() != expected:
+                delete_part_and_sidecar(part)
+                offset = 0
+        if self.peer_supports_resume:
+            if offset == size and size > 0:
+                # Already complete: no transfer, no card. The
+                # sender is told to resume from the end and
+                # sends nothing.
+                self._send_resume_reply("resume", name, offset)
+            elif offset > 0:
+                decision = "allow"
+                if self.on_resume_ask is not None:
+                    try:
+                        decision = self.on_resume_ask(name, offset, size)
+                    except Exception:
+                        decision = "allow"
+                if decision == "deny":
+                    delete_part_and_sidecar(part)
+                    self._send_resume_reply("resume_denied", name)
+                    if self.on_file_received is not None:
+                        self.on_file_received(name, False, "resume denied, partial file deleted")
+                    return
+                if decision == "timeout":
+                    # No decision: keep the .part for a later manual
+                    # re-send, but tell the sender to stop now.
+                    self._send_resume_reply("resume_denied", name)
+                    if self.on_file_received is not None:
+                        self.on_file_received(name, False, "resume not approved")
+                    return
+                self._send_resume_reply("resume", name, offset)
+            else:
+                self._send_resume_reply("resume", name, 0)
         digest = hashlib.sha256()
-        remaining = size
+        if offset > 0:
+            # Hash the bytes already on disk, so the final SHA-256
+            # check covers the whole file, not just this attempt.
+            try:
+                with open(part, "rb") as existing:
+                    for chunk in iter(lambda: existing.read(1024 * 256), b""):
+                        digest.update(chunk)
+            except Exception:
+                pass
+        remaining = size - offset
         received = 0
         last_report = 0.0
         try:
-            with open(part, "wb") as dest:
+            with open(part, "ab" if offset > 0 else "wb") as dest:
                 while remaining > 0:
                     chunk = self.sock.recv(min(1024 * 128, remaining))
                     if not chunk:
@@ -404,18 +623,26 @@ class Session:
                     # Receiver progress: report at most every 0.1s, plus
                     # always on the final chunk, so the UI stays live
                     # without flooding it on every 128KB chunk.
+                    # Progress starts at the resume offset, so the UI
+                    # shows total progress, not just this attempt.
                     now = time.monotonic()
                     if self.on_progress is not None and (now - last_report >= 0.1 or remaining == 0):
                         last_report = now
                         try:
-                            self.on_progress(name, received, size)
+                            self.on_progress(name, offset + received, size)
                         except Exception:
                             pass
         except Exception as exc:
             if self.on_error is not None:
                 self.on_error(f"receive failed: {exc}")
+            # The transfer can resume: keep the .part and record
+            # it in the sidecar, so the next attempt picks it up.
+            try:
+                write_part_sidecar(part, self.peer_fingerprint, name, size, expected)
+            except Exception:
+                pass
             if self.on_file_received is not None:
-                self.on_file_received(name, False, "incomplete")
+                self.on_file_received(name, False, "incomplete, kept as .part")
             return
         ok = digest.hexdigest() == expected
         saved_name = name
@@ -462,9 +689,6 @@ class Session:
                 else:
                     ok = False
                     rename_reason = "too many duplicates"
-            # On a rename failure, the .part file is kept as in
-            # v1.1. Section 5 changes .part cleanup on failed
-            # transfers, it is not bundled into this section.
         if self.on_file_received is not None:
             if ok:
                 # On rename, tell the UI the original name, so
@@ -475,9 +699,22 @@ class Session:
                 else:
                     self.on_file_received(saved_name, True, "")
             elif digest.hexdigest() != expected:
-                self.on_file_received(name, False, "SHA-256 mismatch, kept as .part")
+                self.on_file_received(name, False, "SHA-256 mismatch, partial file deleted")
             else:
                 self.on_file_received(name, False, rename_reason or "rename failed")
+        # A failed transfer deletes the .part when the data is
+        # corrupt (SHA mismatch) or could not be saved (rename
+        # failure), because resuming from it would fail again.
+        # An incomplete transfer keeps it, for the next resume.
+        if not ok:
+            delete_part_and_sidecar(part)
+        else:
+            # Success: the .part is renamed, so its sidecar is
+            # an orphan now. Remove it promptly.
+            try:
+                part_sidecar_path(part).unlink()
+            except Exception:
+                pass
         # Ack is a normal message, not a file, so it cannot interleave
         # with file bytes: file bytes are already fully read here.
         # On success, the ack carries the actual saved name, so
@@ -705,6 +942,9 @@ class HostListener:
                 pass
             raise ConnectionError(f"hello failed: {exc}") from exc
         client_device = str(hello.get("device", "")) or "client"
+        # A peer that does not advertise the resume capability
+        # is an old client, and gets a plain full transfer.
+        peer_supports_resume = RESUME_CAPABILITY in (hello.get("capabilities") or [])
         # On a dual-stack socket an IPv4 peer arrives as an
         # IPv4-mapped IPv6 address (::ffff:192.168.1.6); unwrap it
         # so the saved peer address stays a plain IPv4 address.
@@ -780,11 +1020,12 @@ class HostListener:
                     pass
                 raise ConnectionError(f"failed to save trusted client: {exc}") from exc
         try:
-            _send_header(tls, {"type": "hello_ok", "device": self.device})
+            _send_header(tls, {"type": "hello_ok", "device": self.device, "capabilities": [RESUME_CAPABILITY]})
         except Exception as exc:
             raise ConnectionError(f"hello failed: {exc}") from exc
-        session = Session(tls, self.cwd, device=self.device, peer_device=client_device, peer_host=dialled_host)
+        session = Session(tls, self.cwd, device=self.device, peer_device=client_device, peer_host=dialled_host, home=self.home)
         session.peer_fingerprint = peer_fp
+        session.peer_supports_resume = peer_supports_resume
         session.client_trust_status = status
         session.client_old_fingerprint = old_fp
         return session
@@ -856,7 +1097,7 @@ def join_session(host: str, port: int, cwd: Path, device: str,
             cert_b64 = base64.b64encode(cert_der_from_pem(cert_path)).decode()
         except Exception:
             cert_b64 = ""
-        _send_header(tls, {"type": "hello", "device": device, "host": host, "cert": cert_b64})
+        _send_header(tls, {"type": "hello", "device": device, "host": host, "cert": cert_b64, "capabilities": [RESUME_CAPABILITY]})
         reply = _read_header(tls)
         if reply.get("type") == "hello_ok":
             hello_ok = reply
@@ -882,6 +1123,7 @@ def join_session(host: str, port: int, cwd: Path, device: str,
         except Exception:
             pass
         raise
-    session = Session(tls, cwd, device=device, peer_device=str(hello_ok.get("device", "")), peer_host=host)
+    session = Session(tls, cwd, device=device, peer_device=str(hello_ok.get("device", "")), peer_host=host, home=home)
     session.peer_fingerprint = server_fp
+    session.peer_supports_resume = RESUME_CAPABILITY in (hello_ok.get("capabilities") or [])
     return session

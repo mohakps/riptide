@@ -39,6 +39,7 @@ from ..core.file_select import (
     total_size,
 )
 from ..core.focus import focus_first, handle_arrow_key
+from ..core.resume import RESUME_DECISION_TIMEOUT, pending_for_peer, remove_pending
 from ..core.session import Session
 from ..core.transfer import TransferProgress, format_bytes as fmt_bytes, format_eta
 from ..theme import BANNER_CLIENT, BANNER_HOST
@@ -155,6 +156,16 @@ class SessionScreen(Screen):
         self._pending_downloads: list[tuple[str, str]] = []
         self._approve_btn: Button | None = None
         self._deny_btn: Button | None = None
+        # Resume card state. The reader thread waits on
+        # _resume_event for the user's decision, so a resume
+        # never starts before the user allows it, and the
+        # decision is recorded exactly once.
+        self._resume_event = threading.Event()
+        self._resume_decision: dict = {}
+        self._resume_lock = threading.Lock()
+        self._resume_name = ""
+        self._approve_resume_btn: Button | None = None
+        self._deny_resume_btn: Button | None = None
         self._transfer_active: bool = False
         self._progress_visible: bool = False
         self._complete_timer = None
@@ -421,6 +432,20 @@ class SessionScreen(Screen):
             ),
             id="download_modal_overlay",
         )
+        yield Vertical(
+            Vertical(
+                Static("↻  RESUME TRANSFER", id="resume_modal_title"),
+                Static("", id="resume_approval"),
+                Horizontal(
+                    Button("Resume", id="approve_resume", classes="allow"),
+                    Button("Deny", id="deny_resume", classes="deny"),
+                    id="resume_modal_actions",
+                ),
+                Static(r"[bold #E8E8E8]\[Enter][/] [dim #FFFFFF]Resume[/]    [bold #E8E8E8]\[Backspace][/] [dim #FFFFFF]Deny[/]", id="resume_modal_footer"),
+                id="resume_modal_card",
+            ),
+            id="resume_modal_overlay",
+        )
 
     def on_mount(self) -> None:
         self.session.on_file_received = lambda name, ok, reason: self.app.call_from_thread(self._on_received, name, ok, reason)
@@ -434,7 +459,15 @@ class SessionScreen(Screen):
         )
         self.session.on_download_ask = lambda name, rid: self.app.call_from_thread(self._on_download_ask, name, rid)
         self.session.on_download_denied = lambda name, rid: self.app.call_from_thread(self._on_download_denied, name, rid)
+        # The resume card is answered synchronously by the reader
+        # thread, so on_resume_ask is a plain callable, not a
+        # call_from_thread lambda: it shows the card on the main
+        # thread and waits for the decision itself.
+        self.session.on_resume_ask = self._ask_resume
         self.session.start()
+        # On rejoin with the same peer, pending interrupted
+        # transfers resume automatically, without tapping Send.
+        self._auto_resume_pending()
         self._find_cursor_visible = True
         try:
             self.set_interval(0.5, self._toggle_find_cursor)
@@ -447,7 +480,13 @@ class SessionScreen(Screen):
             self._deny_btn = self.query_one("#deny_download", Button)
         except Exception:
             pass
+        try:
+            self._approve_resume_btn = self.query_one("#approve_resume", Button)
+            self._deny_resume_btn = self.query_one("#deny_resume", Button)
+        except Exception:
+            pass
         self._set_download_approval_visible(False)
+        self._set_resume_visible(False)
         self._set_progress_visible(False)
         self._update_header()
         focus_first(self)
@@ -841,8 +880,124 @@ class SessionScreen(Screen):
             self._answer_download(True)
         elif event.button.id == "deny_download":
             self._answer_download(False)
+        elif event.button.id == "approve_resume":
+            self._answer_resume(True)
+        elif event.button.id == "deny_resume":
+            self._answer_resume(False)
         elif event.button.id == "leave":
             self._leave_session()
+
+    # -- resume -------------------------------------------------------
+    def _ask_resume(self, name: str, offset: int, size: int) -> str:
+        """Ask the user whether to resume an interrupted transfer.
+
+        Called from the session reader thread. Shows the resume
+        card on the main thread and waits for the decision.
+        Returns "allow", "deny", or "timeout". On a timeout the
+        card is hidden and the .part is kept, so a later manual
+        re-send still resumes it.
+        """
+        self._resume_event = threading.Event()
+        self._resume_decision = {}
+        self._resume_name = name
+        self.app.call_from_thread(self._show_resume_card, name, offset, size)
+        if self._resume_event.wait(timeout=RESUME_DECISION_TIMEOUT):
+            return self._resume_decision.get("value", "deny")
+        self.app.call_from_thread(self._set_resume_visible, False)
+        return "timeout"
+
+    def _show_resume_card(self, name: str, offset: int, size: int) -> None:
+        try:
+            card_content = max(12, min(56, self._screen_width() - 8))
+            trunc_name = _truncate_filename(name, card_content)
+            percent = (offset * 100 // size) if size else 0
+            self.query_one("#resume_approval", Static).update(
+                f"Resume interrupted transfer:\n[bold #FFFFFF]{trunc_name}[/]\n"
+                f"[dim #A1A1AA]{format_bytes(offset)} of {format_bytes(size)} already here ({percent}%).[/]\n\n"
+                f"[dim #A1A1AA]Resume to continue from where it stopped, Deny to delete the partial file.[/]"
+            )
+        except Exception:
+            pass
+        self._set_resume_visible(True)
+
+    def _set_resume_visible(self, visible: bool) -> None:
+        try:
+            overlay = self.query_one("#resume_modal_overlay", Vertical)
+            if visible:
+                overlay.add_class("active")
+                overlay.styles.display = "block"
+                if self._approve_resume_btn:
+                    self._approve_resume_btn.focus()
+            else:
+                overlay.remove_class("active")
+                overlay.styles.display = "none"
+        except Exception:
+            pass
+        for btn in (self._approve_resume_btn, self._deny_resume_btn):
+            if btn is not None:
+                try:
+                    btn.styles.display = "block" if visible else "none"
+                except Exception:
+                    pass
+
+    def _answer_resume(self, allow: bool) -> None:
+        with self._resume_lock:
+            if self._resume_event.is_set():
+                return
+            self._resume_decision["value"] = "allow" if allow else "deny"
+            self._resume_event.set()
+        self._set_resume_visible(False)
+        self._set_status(f"{'Resuming' if allow else 'Resume denied for'} {self._resume_name}")
+
+    def _auto_resume_pending(self) -> None:
+        """Re-send pending interrupted transfers on rejoin.
+
+        Runs on a worker thread. For each pending transfer for
+        this peer, in order, if the sender's file still exists,
+        send it; the receiver resumes from its .part. A failure
+        stops the loop, and the rest stay pending for the next
+        rejoin. A file that no longer exists has its entry dropped.
+        """
+        # A mock session without a fingerprint has no peer to
+        # resume with, so there is nothing to auto-resume.
+        if not getattr(self.session, "peer_fingerprint", ""):
+            return
+
+        def worker():
+            try:
+                entries = pending_for_peer(getattr(self.session, "home", None), self.session.peer_fingerprint)
+            except Exception:
+                return
+            for entry in entries:
+                path = Path(entry.get("path", ""))
+                if not path.is_file():
+                    try:
+                        remove_pending(
+                            getattr(self.session, "home", None),
+                            entry.get("peer_fingerprint", ""),
+                            entry.get("name", ""),
+                            int(entry.get("size", 0)),
+                            entry.get("sha256", ""),
+                        )
+                    except Exception:
+                        pass
+                    continue
+                total = path.stat().st_size if path.is_file() else 0
+                self._transfer_active = True
+                self.app.call_from_thread(self._set_status, f"Resuming {path.name}...")
+                self.app.call_from_thread(self._set_progress_visible, True)
+
+                def on_file_prog(sent_name: str, sent: int, single_total: int, _total=total) -> None:
+                    self.app.call_from_thread(
+                        self._on_progress, sent_name, sent, single_total, sent, _total, "Sending"
+                    )
+
+                ok = self.session.send_file(path, on_progress=on_file_prog)
+                self.app.call_from_thread(self._finish_send, 1 if ok else 0, 0 if ok else 1)
+                if not ok:
+                    return
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _leave_session(self) -> None:
         self._connection_state = "disconnected"
