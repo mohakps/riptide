@@ -142,31 +142,31 @@ def test_firewall_open_port_invokes_os_command():
 
 @pytest.mark.asyncio
 async def test_menu_clicking_create_server_firewall_flow(tmp_path: Path):
-    """When clicking create server, check port, open if closed, save the result."""
+    """When clicking create server, run the first-time setup and save it."""
     app = _MenuTestApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         with patch(
-            "riptide.core.firewall.ensure_firewall_port_with_elevation", return_value=(False, True, True, False)
-        ) as mock_ensure:
+            "riptide.core.firewall.setup_firewall_port", return_value="opened"
+        ) as mock_setup:
             async with app.run_test() as pilot:
                 opt_list = app.screen.query_one("#menu_list", OptionList)
                 opt_list.highlighted = 0
                 await pilot.press("enter")
                 await pilot.pause()
 
-                assert mock_ensure.called
-                # Port was closed, then opened, so the saved state is open.
+                assert mock_setup.called
+                # Setup succeeded, so the saved state is open.
                 cfg = load_config(home=tmp_path)
                 assert cfg.firewall_port_open is True
 
 
 @pytest.mark.asyncio
 async def test_menu_clicking_create_server_firewall_failed(tmp_path: Path):
-    """When opening fails, the saved state stays closed."""
+    """When setup fails, the saved state stays closed."""
     app = _MenuTestApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         with patch(
-            "riptide.core.firewall.ensure_firewall_port_with_elevation", return_value=(False, False, False, False)
+            "riptide.core.firewall.setup_firewall_port", return_value="failed"
         ):
             async with app.run_test() as pilot:
                 opt_list = app.screen.query_one("#menu_list", OptionList)

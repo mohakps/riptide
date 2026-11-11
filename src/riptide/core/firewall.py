@@ -455,7 +455,10 @@ def elevated_open_firewall_port_linux(port: int) -> str:
     Returns "opened", "cancelled", or "failed". Only the first
     firewall tool found is tried, so at most one prompt appears
     per click. For firewalld, add and reload run in one pkexec
-    shell command, again so only one prompt appears.
+    shell command, again so only one prompt appears. A zero exit
+    code means the rule was added; the rule is not re-checked
+    afterwards, because reading it needs root on ufw systems
+    and the check wrongly reported open when it could not look.
     """
     if not _valid_port(port):
         return "failed"
@@ -478,7 +481,10 @@ def elevated_open_firewall_port_linux(port: int) -> str:
         return "cancelled"
     if result != 0:
         return "failed"
-    return "opened" if check_firewall_port(port) else "failed"
+    # The command itself is the create step: a zero exit code
+    # means the rule was added (ufw also exits zero when the
+    # rule already exists). The rule is not re-checked here.
+    return "opened"
 
 
 def elevated_open_firewall_port(port: int, poll_timeout: float = 30) -> str:
@@ -495,42 +501,32 @@ def elevated_open_firewall_port(port: int, poll_timeout: float = 30) -> str:
     return "failed"
 
 
-def ensure_firewall_port_with_elevation(
-    port: int, poll_timeout: float = 30
-) -> tuple[bool, bool, bool, bool]:
-    """Check the port, open it if closed, with elevation if needed.
+def setup_firewall_port(port: int, poll_timeout: float = 30) -> str:
+    """Create the port rule once, on the first Create Server click.
 
-    Returns (was_open, opened, is_open_now, cancelled). This is
-    the menu path only: it may prompt once, on the Create Server
-    click. The 20 second watch loop must keep using the plain
-    ensure_firewall_port, which never prompts.
+    Called from the Create Server click while setup has not
+    succeeded (the config record does not say open). Tries the plain open
+    first (root, or passwordless sudo on Linux), then the
+    elevation prompt. Returns "opened", "cancelled", or
+    "failed". Only "opened" marks setup done in config.
 
-    Order matters, so no prompt appears when it is not needed:
-    already open, then a block rule on Windows (an allow rule
-    cannot open it, so prompting would mislead), then already
-    elevated, then the plain open (passwordless sudo on Linux),
-    and only then the elevation prompt. The command is fixed
-    to port 50000 in practice through config.session_port, and
-    only that port is ever opened; no program rule is checked
-    or relied on.
+    "opened" means the create command itself succeeded; the
+    rule is not re-checked afterwards, because reading it
+    needs root on ufw systems and the check wrongly reported
+    open when it could not look. On Windows, a block rule for
+    the same port is checked first and returns "failed" without
+    prompting, since an allow rule cannot open a blocked port.
     """
-    was_open = check_firewall_port(port)
-    if was_open:
-        return (True, False, True, False)
-    if get_os() == "windows" and windows_block_rule_exists(port):
-        return (False, False, False, False)
-    if is_elevated() or get_os() not in ("windows", "linux"):
-        _was, opened, is_open_now = ensure_firewall_port(port)
-        return (_was, opened, is_open_now, False)
-    _was, opened, is_open_now = ensure_firewall_port(port)
-    if is_open_now:
-        return (_was, opened, is_open_now, False)
-    result = elevated_open_firewall_port(port, poll_timeout=poll_timeout)
-    if result == "opened":
-        return (False, True, True, False)
-    if result == "cancelled":
-        return (False, False, False, True)
-    return (False, False, False, False)
+    if not _valid_port(port):
+        return "failed"
+    os_name = get_os()
+    if os_name == "windows" and windows_block_rule_exists(port):
+        return "failed"
+    if os_name not in ("windows", "linux"):
+        return "failed"
+    if open_firewall_port(port):
+        return "opened"
+    return elevated_open_firewall_port(port, poll_timeout=poll_timeout)
 
 
 def ensure_firewall_port(port: int) -> tuple[bool, bool, bool]:

@@ -1,4 +1,5 @@
-"""UAC on Windows and pkexec on Linux, for the Create Server click only.
+"""UAC on Windows and pkexec on Linux, for the first-launch setup
+and the Create Server click.
 
 All elevation calls are mocked here: this VM is Linux, it has no
 Windows UAC and no pkexec binary, so a real prompt can never be
@@ -112,9 +113,14 @@ def test_linux_pkexec_cancelled_is_126():
 def test_linux_pkexec_success_and_failure():
     with patch("riptide.core.firewall.get_os", return_value="linux"):
         with patch("riptide.core.firewall.shutil.which", side_effect=lambda name: f"/usr/bin/{name}" if name == "ufw" else None):
+            # A zero exit code means the rule was added. The rule
+            # is not re-checked: reading it needs root on ufw
+            # systems, and the check wrongly reported open when
+            # it could not look.
             with patch("riptide.core.firewall._pkexec_run", return_value=0):
-                with patch("riptide.core.firewall.check_firewall_port", return_value=True):
+                with patch("riptide.core.firewall.check_firewall_port") as mock_check:
                     assert fw.elevated_open_firewall_port_linux(50000) == "opened"
+                    mock_check.assert_not_called()
             with patch("riptide.core.firewall._pkexec_run", return_value=127):
                 assert fw.elevated_open_firewall_port_linux(50000) == "failed"
 
@@ -128,60 +134,13 @@ def test_linux_firewalld_uses_one_pkexec_call():
     with patch("riptide.core.firewall.get_os", return_value="linux"):
         with patch("riptide.core.firewall.shutil.which", side_effect=lambda name: "/usr/bin/firewall-cmd" if name == "firewall-cmd" else None):
             with patch("riptide.core.firewall._pkexec_run", return_value=0) as mock_pkexec:
-                with patch("riptide.core.firewall.check_firewall_port", return_value=True):
+                with patch("riptide.core.firewall.check_firewall_port") as mock_check:
                     assert fw.elevated_open_firewall_port_linux(50000) == "opened"
                     assert mock_pkexec.call_count == 1
+                    mock_check.assert_not_called()
                     cmd = " ".join(mock_pkexec.call_args[0][0])
                     assert "firewall-cmd --add-port=50000/tcp" in cmd
                     assert "firewall-cmd --reload" in cmd
-
-
-def test_ensure_with_elevation_already_open_prompts_nothing():
-    with patch("riptide.core.firewall.check_firewall_port", return_value=True):
-        with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
-            assert fw.ensure_firewall_port_with_elevation(50000) == (True, False, True, False)
-            mock_elev.assert_not_called()
-
-
-def test_ensure_with_elevation_block_rule_prompts_nothing():
-    with patch("riptide.core.firewall.get_os", return_value="windows"):
-        with patch("riptide.core.firewall.check_firewall_port", return_value=False):
-            with patch("riptide.core.firewall.windows_block_rule_exists", return_value=True):
-                with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
-                    assert fw.ensure_firewall_port_with_elevation(50000) == (False, False, False, False)
-                    mock_elev.assert_not_called()
-
-
-def test_ensure_with_elevation_already_elevated_uses_plain_path():
-    with patch("riptide.core.firewall.check_firewall_port", return_value=False):
-        with patch("riptide.core.firewall.is_elevated", return_value=True):
-            with patch("riptide.core.firewall.ensure_firewall_port", return_value=(False, True, True)):
-                with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
-                    assert fw.ensure_firewall_port_with_elevation(50000) == (False, True, True, False)
-                    mock_elev.assert_not_called()
-
-
-def test_ensure_with_elevation_plain_open_first_then_prompt():
-    with patch("riptide.core.firewall.get_os", return_value="linux"):
-        with patch("riptide.core.firewall.check_firewall_port", return_value=False):
-            with patch("riptide.core.firewall.is_elevated", return_value=False):
-                with patch("riptide.core.firewall.ensure_firewall_port", return_value=(False, True, True)):
-                    with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
-                        assert fw.ensure_firewall_port_with_elevation(50000) == (False, True, True, False)
-                        mock_elev.assert_not_called()
-
-
-def test_ensure_with_elevation_cancelled_and_opened():
-    with patch("riptide.core.firewall.get_os", return_value="linux"):
-        with patch("riptide.core.firewall.check_firewall_port", return_value=False):
-            with patch("riptide.core.firewall.is_elevated", return_value=False):
-                with patch("riptide.core.firewall.ensure_firewall_port", return_value=(False, False, False)):
-                    with patch("riptide.core.firewall.elevated_open_firewall_port", return_value="cancelled"):
-                        assert fw.ensure_firewall_port_with_elevation(50000) == (False, False, False, True)
-                    with patch("riptide.core.firewall.elevated_open_firewall_port", return_value="opened"):
-                        assert fw.ensure_firewall_port_with_elevation(50000) == (False, True, True, False)
-                    with patch("riptide.core.firewall.elevated_open_firewall_port", return_value="failed"):
-                        assert fw.ensure_firewall_port_with_elevation(50000) == (False, False, False, False)
 
 
 class _CancelledApp(App):
@@ -217,8 +176,8 @@ async def test_menu_cancelled_saves_closed_and_passes_cancelled(tmp_path: Path):
     app = _MenuCancelledApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         with patch(
-            "riptide.core.firewall.ensure_firewall_port_with_elevation",
-            return_value=(False, False, False, True),
+            "riptide.core.firewall.setup_firewall_port",
+            return_value="cancelled",
         ):
             async with app.run_test() as pilot:
                 opt_list = app.screen.query_one("#menu_list", OptionList)

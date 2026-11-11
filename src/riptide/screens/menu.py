@@ -40,26 +40,33 @@ class MenuScreen(Screen):
         if opt_id == "create":
             config = load_config()
             port = config.session_port
-            # On clicking Create Server, check the OS firewall for the
-            # session port and open it automatically if it is closed.
-            # This is the only place that may prompt for elevation:
-            # UAC on Windows, pkexec on Linux. The plain open runs
-            # first (admin on Windows, passwordless sudo on Linux),
-            # so no prompt appears when it is not needed. The
-            # 20 second watch loop on the Create page never prompts.
-            # The Create page then reports opened, cancelled, or
-            # failed, with the manual command when opening failed.
-            from ..core.firewall import ensure_firewall_port_with_elevation
+            # First Create Server click: create the port rule once
+            # and record it in config. Later clicks trust that
+            # record (firewall_port_open is True) and do not check
+            # the firewall or prompt again. While the record does
+            # not say open, this click runs the setup.
+            firewall_opened = False
+            firewall_cancelled = False
+            port_was_closed = False
+            if config.firewall_port_open is not True:
+                from ..core.firewall import setup_firewall_port
 
-            was_open, opened, is_open_now, cancelled = ensure_firewall_port_with_elevation(port)
-            config.firewall_port_open = is_open_now
-            save_config(config)
-
+                result = setup_firewall_port(port)
+                port_was_closed = True
+                if result == "opened":
+                    config.firewall_port_open = True
+                    firewall_opened = True
+                elif result == "cancelled":
+                    config.firewall_port_open = False
+                    firewall_cancelled = True
+                else:
+                    config.firewall_port_open = False
+                save_config(config)
             self.app.push_screen(
                 CreateScreen(
-                    port_was_closed=not was_open,
-                    firewall_opened=opened,
-                    firewall_cancelled=cancelled,
+                    port_was_closed=port_was_closed,
+                    firewall_opened=firewall_opened,
+                    firewall_cancelled=firewall_cancelled,
                 )
             )
         elif opt_id == "join":
