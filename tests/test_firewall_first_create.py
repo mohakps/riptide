@@ -1,5 +1,13 @@
 """First Create Server click: create the firewall rule once,
-record it in config, and trust that record on later clicks.
+record it in config, and trust that record on later clicks
+(Linux only).
+
+Windows checks the port on every Create click instead, because
+reading the rule state needs no admin there (netsh show rule
+runs for a normal user), so a deleted rule is re-created on
+the next click. Linux keeps the record-trust: the check needs
+root to read ufw status, so it cannot tell a closed port from
+an unreadable one.
 
 This replaces the old click-time check. The old check asked ufw
 for the port status as a normal user, ufw refused to answer
@@ -113,44 +121,47 @@ async def test_app_launch_does_not_touch_the_firewall(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_menu_click_setup_done_skips_the_firewall_entirely(tmp_path: Path):
     """Later clicks trust the config record: no check, no open,
-    no prompt."""
+    no prompt. (Linux: the check needs root to read ufw status,
+    so the record is trusted.)"""
     app = _MenuApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         save_config(Config(session_port=50000, firewall_port_open=True), home=tmp_path)
-        with patch("riptide.core.firewall.setup_firewall_port") as mock_setup:
-            with patch("riptide.core.firewall.check_firewall_port") as mock_check:
-                with patch("riptide.core.firewall.open_firewall_port") as mock_open:
-                    with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
-                        async with app.run_test() as pilot:
-                            opt_list = app.screen.query_one("#menu_list", OptionList)
-                            opt_list.highlighted = 0
-                            await pilot.press("enter")
-                            await pilot.pause()
-                            assert isinstance(app.screen, CreateScreen)
-                            assert app.screen.port_was_closed is False
-                            assert app.screen.firewall_opened is False
-                            assert app.screen.firewall_cancelled is False
-                            mock_setup.assert_not_called()
-                            mock_check.assert_not_called()
-                            mock_open.assert_not_called()
-                            mock_elev.assert_not_called()
+        with patch("riptide.core.firewall.get_os", return_value="linux"):
+            with patch("riptide.core.firewall.setup_firewall_port") as mock_setup:
+                with patch("riptide.core.firewall.check_firewall_port") as mock_check:
+                    with patch("riptide.core.firewall.open_firewall_port") as mock_open:
+                        with patch("riptide.core.firewall.elevated_open_firewall_port") as mock_elev:
+                            async with app.run_test() as pilot:
+                                opt_list = app.screen.query_one("#menu_list", OptionList)
+                                opt_list.highlighted = 0
+                                await pilot.press("enter")
+                                await pilot.pause()
+                                assert isinstance(app.screen, CreateScreen)
+                                assert app.screen.port_was_closed is False
+                                assert app.screen.firewall_opened is False
+                                assert app.screen.firewall_cancelled is False
+                                mock_setup.assert_not_called()
+                                mock_check.assert_not_called()
+                                mock_open.assert_not_called()
+                                mock_elev.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_menu_click_runs_setup_when_not_done(tmp_path: Path):
     app = _MenuApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
-        with patch("riptide.core.firewall.setup_firewall_port", return_value="opened") as mock_setup:
-            async with app.run_test() as pilot:
-                opt_list = app.screen.query_one("#menu_list", OptionList)
-                opt_list.highlighted = 0
-                await pilot.press("enter")
-                await pilot.pause()
-                mock_setup.assert_called_once_with(50000)
-                assert load_config(home=tmp_path).firewall_port_open is True
-                assert isinstance(app.screen, CreateScreen)
-                assert app.screen.port_was_closed is True
-                assert app.screen.firewall_opened is True
+        with patch("riptide.core.firewall.get_os", return_value="linux"):
+            with patch("riptide.core.firewall.setup_firewall_port", return_value="opened") as mock_setup:
+                async with app.run_test() as pilot:
+                    opt_list = app.screen.query_one("#menu_list", OptionList)
+                    opt_list.highlighted = 0
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    mock_setup.assert_called_once_with(50000)
+                    assert load_config(home=tmp_path).firewall_port_open is True
+                    assert isinstance(app.screen, CreateScreen)
+                    assert app.screen.port_was_closed is True
+                    assert app.screen.firewall_opened is True
 
 
 @pytest.mark.asyncio
@@ -159,11 +170,115 @@ async def test_menu_click_runs_setup_when_record_says_closed(tmp_path: Path):
     app = _MenuApp()
     with patch("riptide.core.config.config_dir", return_value=tmp_path):
         save_config(Config(session_port=50000, firewall_port_open=False), home=tmp_path)
-        with patch("riptide.core.firewall.setup_firewall_port", return_value="opened") as mock_setup:
-            async with app.run_test() as pilot:
-                opt_list = app.screen.query_one("#menu_list", OptionList)
-                opt_list.highlighted = 0
-                await pilot.press("enter")
-                await pilot.pause()
-                mock_setup.assert_called_once_with(50000)
-                assert load_config(home=tmp_path).firewall_port_open is True
+        with patch("riptide.core.firewall.get_os", return_value="linux"):
+            with patch("riptide.core.firewall.setup_firewall_port", return_value="opened") as mock_setup:
+                async with app.run_test() as pilot:
+                    opt_list = app.screen.query_one("#menu_list", OptionList)
+                    opt_list.highlighted = 0
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    mock_setup.assert_called_once_with(50000)
+                    assert load_config(home=tmp_path).firewall_port_open is True
+
+
+# -- Windows: check the port on every Create click --------------------
+# Reading the rule state needs no admin on Windows (netsh show
+# rule runs for a normal user), so the config record is not
+# trusted there: the live check decides, and a deleted rule is
+# re-created on the next click.
+
+
+@pytest.mark.asyncio
+async def test_windows_menu_click_checks_port_every_time_when_open(tmp_path: Path):
+    """Windows, port open: the check runs even though the config
+    record already says the setup is done. No setup, no prompt,
+    no banner."""
+    app = _MenuApp()
+    with patch("riptide.core.config.config_dir", return_value=tmp_path):
+        save_config(Config(session_port=50000, firewall_port_open=True), home=tmp_path)
+        with patch("riptide.core.firewall.get_os", return_value="windows"):
+            with patch("riptide.core.firewall.check_firewall_port", return_value=True) as mock_check:
+                with patch("riptide.core.firewall.setup_firewall_port") as mock_setup:
+                    with patch("riptide.core.firewall.windows_riptide_rule_profile", return_value=None):
+                        async with app.run_test() as pilot:
+                            opt_list = app.screen.query_one("#menu_list", OptionList)
+                            opt_list.highlighted = 0
+                            await pilot.press("enter")
+                            await pilot.pause()
+                            mock_check.assert_called_once_with(50000)
+                            mock_setup.assert_not_called()
+                            assert isinstance(app.screen, CreateScreen)
+                            assert app.screen.port_was_closed is False
+                            assert app.screen.firewall_opened is False
+                            assert app.screen.firewall_cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_windows_menu_click_reopens_rule_deleted_after_setup(tmp_path: Path):
+    """Windows, rule deleted after setup: the config record still
+    says open, but the live check says closed, so the setup runs
+    again and re-creates the rule. This is the case the Linux
+    record-trust cannot catch."""
+    app = _MenuApp()
+    with patch("riptide.core.config.config_dir", return_value=tmp_path):
+        save_config(Config(session_port=50000, firewall_port_open=True), home=tmp_path)
+        with patch("riptide.core.firewall.get_os", return_value="windows"):
+            with patch("riptide.core.firewall.check_firewall_port", return_value=False) as mock_check:
+                with patch("riptide.core.firewall.setup_firewall_port", return_value="opened") as mock_setup:
+                    with patch("riptide.core.firewall.windows_riptide_rule_profile", return_value=None):
+                        async with app.run_test() as pilot:
+                            opt_list = app.screen.query_one("#menu_list", OptionList)
+                            opt_list.highlighted = 0
+                            await pilot.press("enter")
+                            await pilot.pause()
+                            mock_check.assert_called_once_with(50000)
+                            mock_setup.assert_called_once_with(50000)
+                            assert load_config(home=tmp_path).firewall_port_open is True
+                            assert isinstance(app.screen, CreateScreen)
+                            assert app.screen.port_was_closed is True
+                            assert app.screen.firewall_opened is True
+
+
+@pytest.mark.asyncio
+async def test_windows_menu_click_syncs_record_when_port_open(tmp_path: Path):
+    """Windows, port open but no config record: no setup, and the
+    record is written so config matches reality."""
+    app = _MenuApp()
+    with patch("riptide.core.config.config_dir", return_value=tmp_path):
+        with patch("riptide.core.firewall.get_os", return_value="windows"):
+            with patch("riptide.core.firewall.check_firewall_port", return_value=True) as mock_check:
+                with patch("riptide.core.firewall.setup_firewall_port") as mock_setup:
+                    with patch("riptide.core.firewall.windows_riptide_rule_profile", return_value=None):
+                        async with app.run_test() as pilot:
+                            opt_list = app.screen.query_one("#menu_list", OptionList)
+                            opt_list.highlighted = 0
+                            await pilot.press("enter")
+                            await pilot.pause()
+                            mock_check.assert_called_once_with(50000)
+                            mock_setup.assert_not_called()
+                            assert load_config(home=tmp_path).firewall_port_open is True
+                            assert isinstance(app.screen, CreateScreen)
+                            assert app.screen.port_was_closed is False
+
+
+@pytest.mark.asyncio
+async def test_windows_menu_click_setup_cancelled_when_closed(tmp_path: Path):
+    """Windows, port closed and the user cancels the admin prompt:
+    the record is False, the cancelled banner is shown."""
+    app = _MenuApp()
+    with patch("riptide.core.config.config_dir", return_value=tmp_path):
+        with patch("riptide.core.firewall.get_os", return_value="windows"):
+            with patch("riptide.core.firewall.check_firewall_port", return_value=False) as mock_check:
+                with patch("riptide.core.firewall.setup_firewall_port", return_value="cancelled") as mock_setup:
+                    with patch("riptide.core.firewall.windows_riptide_rule_profile", return_value=None):
+                        async with app.run_test() as pilot:
+                            opt_list = app.screen.query_one("#menu_list", OptionList)
+                            opt_list.highlighted = 0
+                            await pilot.press("enter")
+                            await pilot.pause()
+                            mock_check.assert_called_once_with(50000)
+                            mock_setup.assert_called_once_with(50000)
+                            assert load_config(home=tmp_path).firewall_port_open is False
+                            assert isinstance(app.screen, CreateScreen)
+                            assert app.screen.port_was_closed is True
+                            assert app.screen.firewall_cancelled is True

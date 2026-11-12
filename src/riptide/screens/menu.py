@@ -43,17 +43,32 @@ class MenuScreen(Screen):
         if opt_id == "create":
             config = load_config()
             port = config.session_port
-            # First Create Server click: create the port rule once
-            # and record it in config. Later clicks trust that
-            # record (firewall_port_open is True) and do not check
-            # the firewall or prompt again. While the record does
-            # not say open, this click runs the setup.
+            # Windows: reading the firewall rule state needs no
+            # admin (netsh show rule runs for a normal user), so
+            # check the port on every Create click and re-open it
+            # if the rule is gone. Linux: the check needs root to
+            # read ufw status, so the port is set up once, on the
+            # first Create click, and the config record is trusted
+            # after that. While the record does not say open, this
+            # click runs the setup.
             firewall_opened = False
             firewall_cancelled = False
             port_was_closed = False
-            if config.firewall_port_open is not True:
-                from ..core.firewall import setup_firewall_port
+            from ..core.firewall import check_firewall_port, get_os, setup_firewall_port
 
+            run_setup = False
+            if get_os() == "windows":
+                if check_firewall_port(port):
+                    # Port is open. Sync the record so config
+                    # matches reality; no banner, no prompt.
+                    if config.firewall_port_open is not True:
+                        config.firewall_port_open = True
+                        save_config(config)
+                else:
+                    run_setup = True
+            elif config.firewall_port_open is not True:
+                run_setup = True
+            if run_setup:
                 result = setup_firewall_port(port)
                 port_was_closed = True
                 if result == "opened":
