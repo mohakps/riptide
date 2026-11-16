@@ -31,6 +31,7 @@ for a message it is supposed to read itself.
 from __future__ import annotations
 
 import base64
+import collections
 import hashlib
 import inspect
 import ipaddress
@@ -69,6 +70,18 @@ from .resume import (
 # not advertise it is an old client, and gets a plain full
 # transfer with no resume negotiation.
 RESUME_CAPABILITY = "resume"
+
+# How long a sender that cancelled its own send waits for the
+# receiver's answer (cancel_ack, or ack when completion won the
+# race) before giving up and treating the transfer as cancelled.
+# Mirrors RESUME_RESPONSE_TIMEOUT: the receiver answers within
+# its own decision window, so a longer wait would only delay a
+# dead connection.
+CANCEL_OUTCOME_TIMEOUT = 30.0
+
+# Bytes of zero padding sent at a time when a cancelled send is
+# drained to the declared size. No disk read, just a buffer.
+_CANCEL_PAD_CHUNK = 1024 * 1024
 
 
 def parse_host_input(text: str) -> str:
@@ -213,6 +226,62 @@ class Session:
         self._resume_event = threading.Event()
         self._resume_offset = 0
         self._resume_denied = False
+        # Cancel state. A transfer is cancelled by draining to
+        # the next message boundary, never by closing the socket,
+        # so the session stays open for the next transfer. There
+        # is no capability negotiation and no old-peer fallback:
+        # both peers are expected to be new.
+        #
+        # The reader is the only thread that reads the socket, so
+        # a send loop never reads control data itself. The reader
+        # sets these flags and the send/receive loops poll them
+        # between chunks, which is the equivalent of the zero
+        # timeout socket poll, without two threads splitting the
+        # byte stream.
+        #
+        # The file currently being sent, or None. The reader only
+        # records a cancel outcome for this name, so a late ack
+        # for an earlier file cannot settle a later transfer.
+        self._sending_name: str | None = None
+        # The file currently being received, or None.
+        self._receiving_name: str | None = None
+        # Local user cancelled the outgoing transfer: set by
+        # cancel_send(). The send loop pads zeros for the
+        # remainder, sends "cancel", and waits for the outcome.
+        self._cancel_send_requested = threading.Event()
+        self._cancel_send_name: str | None = None
+        # The peer cancelled our send: set by the reader when a
+        # "cancel" arrives for the file being sent. The send loop
+        # pads zeros for the remainder and sends "cancel_ack".
+        self._peer_cancel_event = threading.Event()
+        self._peer_cancel_name: str | None = None
+        # Local user cancelled the incoming transfer: set by
+        # cancel_receive(), which also sends "cancel". The
+        # receive loop drains the payload and discards it.
+        self._cancel_receive_requested = threading.Event()
+        self._cancel_receive_name: str | None = None
+        # Receives cancelled locally, name -> .part path, waiting
+        # for the sender's "cancel_ack". The reader settles them:
+        # it deletes the .part and reports the transfer as
+        # Cancelled. A cancelled receive is never resumable.
+        self._cancelled_receives: dict[str, Path] = {}
+        # The outcome of a sender-initiated cancel, set by the
+        # reader: ("cancel_ack", True) when cancel won, or
+        # ("ack", ok) when the receiver's ack arrived first.
+        # The send loop waits on _sending_outcome_event.
+        self._sending_outcome: tuple[str, bool] | None = None
+        self._sending_outcome_event = threading.Event()
+        # Framed messages the receive path read ahead (its peek
+        # for a pending "cancel" after the payload) that are not
+        # a cancel for this file. The reader dispatches them
+        # before reading from the socket, so none is lost. This
+        # is how a batch's next file header survives the peek.
+        self._pending_headers: collections.deque = collections.deque()
+        # The name of the last send that was cancelled, for the
+        # UI to tell a cancelled send from a failed one. Set when
+        # send_file returns False because of a cancel, cleared at
+        # the start of every send_file.
+        self.last_cancelled_send: str | None = None
         self.client_trust_status = ""
         self.client_old_fingerprint = ""
         self.on_file_received = on_file_received
@@ -280,6 +349,106 @@ class Session:
         except Exception:
             pass
 
+    # -- cancelling a transfer ------------------------------------
+    # A transfer is cancelled by draining to the next message
+    # boundary, never by closing the socket, so the session stays
+    # open for the next transfer. The canceller and the other side
+    # both deliver exactly the declared number of payload bytes,
+    # so the next framed message is read as a message, not as
+    # file bytes. A cancelled receive deletes its .part and is
+    # never resumable; a cancelled send is never added to
+    # pending.json. Resume stays for connection-loss interrupts
+    # only.
+
+    def cancel_send(self, name: str) -> bool:
+        """Cancel the outgoing transfer of ``name``.
+
+        Called by the UI when the user cancels a send. It only
+        sets the flag; the send loop notices it between chunks,
+        pads zeros for the remainder of the declared size, sends
+        "cancel", and waits for the receiver's answer. Returns
+        True when a send for that file is in progress, False when
+        there is nothing to cancel (the file already finished, or
+        never started).
+        """
+        if self._sending_name != name:
+            return False
+        self._cancel_send_name = name
+        self._cancel_send_requested.set()
+        return True
+
+    def cancel_receive(self, name: str) -> bool:
+        """Cancel the incoming transfer of ``name``.
+
+        Called by the UI when the user cancels a receive. It
+        sends "cancel" now, under the send lock, and sets the
+        flag; the receive loop drains the payload and discards
+        it, then the reader settles the cancel when "cancel_ack"
+        arrives. The .part is deleted and the transfer is never
+        resumable. Returns True when a receive for that file is
+        in progress, False when there is nothing to cancel.
+        """
+        if self._receiving_name != name:
+            return False
+        self._cancel_receive_name = name
+        self._cancel_receive_requested.set()
+        self._send_cancel(name)
+        return True
+
+    def _send_cancel(self, name: str) -> None:
+        """Send a "cancel" message. Acquires the send lock."""
+        with self._send_lock:
+            try:
+                _send_header(self.sock, {"type": "cancel", "name": name})
+            except Exception:
+                pass
+
+    def _send_cancel_ack(self, name: str) -> None:
+        """Send a "cancel_ack" message. Acquires the send lock."""
+        with self._send_lock:
+            try:
+                _send_header(self.sock, {"type": "cancel_ack", "name": name})
+            except Exception:
+                pass
+
+    def _pad_zeros(self, remaining: int) -> None:
+        """Send zero bytes for the remainder of a declared size.
+
+        A cancelled send must still deliver exactly the declared
+        number of payload bytes, or the receiver would read the
+        next framed message as file bytes and lose the boundary.
+        Zeros are fast (no disk read) and the receiver discards
+        them, or fails its SHA check if it already acked, which
+        is the cancel outcome anyway. The caller holds the send
+        lock, so this sends directly without re-acquiring it.
+        """
+        zeros = b"\x00" * _CANCEL_PAD_CHUNK
+        while remaining > 0:
+            chunk = zeros if remaining >= len(zeros) else zeros[:remaining]
+            self.sock.sendall(chunk)
+            remaining -= len(chunk)
+
+    def _wait_cancel_outcome(self, name: str) -> bool:
+        """Wait for the receiver's answer after sending "cancel".
+
+        Returns True when completion won: the receiver's ack
+        arrived with ok true, so the file was received and the
+        cancel is a no-op. Returns False when cancel won
+        ("cancel_ack"), when the ack failed (the zero padding
+        corrupted the hash, which is the cancel outcome), or on
+        timeout (the receiver never answered). The ack may already
+        have arrived before the wait started, so the recorded
+        outcome is checked first.
+        """
+        if self._sending_outcome is not None:
+            kind, ok = self._sending_outcome
+            return kind == "ack" and ok
+        if self._sending_outcome_event.wait(timeout=CANCEL_OUTCOME_TIMEOUT):
+            if self._sending_outcome is not None:
+                kind, ok = self._sending_outcome
+                return kind == "ack" and ok
+        return False
+
     def send_file(self, path: Path, on_progress=None) -> bool:
         path = Path(path)
         if not path.is_file():
@@ -293,72 +462,129 @@ class Session:
         header = {"type": "file", "name": path.name, "size": size, "sha256": digest_hex}
         offset = 0
         header_sent = False
-        with self._send_lock:
-            try:
-                _send_header(self.sock, header)
-                header_sent = True
-                if self.peer_supports_resume:
-                    # Wait for the receiver's resume answer before
-                    # sending any bytes. It replies with the offset
-                    # to resume from, 0 for a fresh transfer, or
-                    # resume_denied when the user refused the resume.
-                    # The reader loop delivers the answer through
-                    # _resume_event, so the wait never blocks the
-                    # reader. The receiver decides within 30s and
-                    # the sender waits 60s, so a slow decision
-                    # reaches the sender as a denial, not a timeout.
-                    self._resume_event.clear()
-                    self._resume_denied = False
-                    self._resume_offset = 0
-                    if not self._resume_event.wait(timeout=RESUME_RESPONSE_TIMEOUT):
-                        if self.on_error is not None:
-                            self.on_error("resume timed out")
+        # This send is the current one: the reader only records a
+        # cancel outcome for this name, and the cancel flags are
+        # cleared so a stale cancel from an earlier send cannot
+        # stop this one. _sending_name is cleared in the finally
+        # below, on every return path.
+        self._sending_name = path.name
+        self.last_cancelled_send = None
+        self._cancel_send_requested.clear()
+        self._cancel_send_name = None
+        self._peer_cancel_event.clear()
+        self._peer_cancel_name = None
+        self._sending_outcome = None
+        self._sending_outcome_event.clear()
+        try:
+            with self._send_lock:
+                try:
+                    _send_header(self.sock, header)
+                    header_sent = True
+                    if self.peer_supports_resume:
+                        # Wait for the receiver's resume answer before
+                        # sending any bytes. It replies with the offset
+                        # to resume from, 0 for a fresh transfer, or
+                        # resume_denied when the user refused the resume.
+                        # The reader loop delivers the answer through
+                        # _resume_event, so the wait never blocks the
+                        # reader. The receiver decides within 30s and
+                        # the sender waits 60s, so a slow decision
+                        # reaches the sender as a denial, not a timeout.
+                        self._resume_event.clear()
+                        self._resume_denied = False
+                        self._resume_offset = 0
+                        if not self._resume_event.wait(timeout=RESUME_RESPONSE_TIMEOUT):
+                            if self.on_error is not None:
+                                self.on_error("resume timed out")
+                            self._record_pending(path, size, digest_hex)
+                            return False
+                        if self._resume_denied:
+                            self._clear_pending(path, size, digest_hex)
+                            if self.on_error is not None:
+                                self.on_error("resume denied")
+                            return False
+                        offset = self._resume_offset
+                        if offset < 0 or offset > size:
+                            offset = 0
+                    sent = offset
+                    last_report = 0.0
+                    with open(path, "rb") as handle:
+                        handle.seek(offset)
+                        while True:
+                            # Cancel check, between chunks. Only
+                            # while bytes remain: once sent == size
+                            # the file is fully sent and the
+                            # receiver will complete it, so a cancel
+                            # landing then is too late and is
+                            # ignored. The reader is the only
+                            # thread that reads the socket, so these
+                            # are event flags it set, not a socket
+                            # poll, which would race the reader.
+                            if sent < size:
+                                if self._peer_cancel_event.is_set() and self._peer_cancel_name == path.name:
+                                    # The peer cancelled our send.
+                                    # Drain to the declared size with
+                                    # zeros, confirm, and stop. No
+                                    # pending entry: a cancelled send
+                                    # is never resumed.
+                                    self._pad_zeros(size - sent)
+                                    # The send lock is already held,
+                                    # so send the ack directly, not
+                                    # through _send_cancel_ack (which
+                                    # would re-acquire it and deadlock).
+                                    _send_header(self.sock, {"type": "cancel_ack", "name": path.name})
+                                    self.last_cancelled_send = path.name
+                                    self._clear_pending(path, size, digest_hex)
+                                    return False
+                                if self._cancel_send_requested.is_set() and self._cancel_send_name == path.name:
+                                    # The local user cancelled. Drain
+                                    # to the declared size with zeros,
+                                    # send "cancel", and wait for the
+                                    # receiver's answer.
+                                    self._pad_zeros(size - sent)
+                                    _send_header(self.sock, {"type": "cancel", "name": path.name})
+                                    if self._wait_cancel_outcome(path.name):
+                                        # Completion won the race: the
+                                        # receiver already acked, so the
+                                        # file was received.
+                                        self._clear_pending(path, size, digest_hex)
+                                        return True
+                                    self.last_cancelled_send = path.name
+                                    self._clear_pending(path, size, digest_hex)
+                                    return False
+                            chunk = handle.read(1024 * 128)
+                            if not chunk:
+                                break
+                            self.sock.sendall(chunk)
+                            sent += len(chunk)
+                            # Sender progress was the bug: it reported every
+                            # 128KB chunk, while the receiver reports at most
+                            # every 0.1s. The UI computes speed from the time
+                            # between UI callbacks, and call_from_thread lets
+                            # the sender run ahead and queue a burst of
+                            # callbacks that the UI then processes almost
+                            # instantly, so bytes / tiny time = 4-5x speed.
+                            # Throttle the sender exactly like the receiver:
+                            # at most every 0.1s, plus always on the final
+                            # chunk, so the UI time between reports is real
+                            # network time, not queue-processing time.
+                            # Progress starts at the resume offset, so the
+                            # UI shows total progress, not just this attempt.
+                            now = time.monotonic()
+                            if on_progress is not None and (now - last_report >= 0.1 or sent >= size):
+                                last_report = now
+                                on_progress(path.name, sent, size)
+                except Exception as exc:
+                    if self.on_error is not None:
+                        self.on_error(f"send failed: {exc}")
+                    if header_sent:
                         self._record_pending(path, size, digest_hex)
-                        return False
-                    if self._resume_denied:
-                        self._clear_pending(path, size, digest_hex)
-                        if self.on_error is not None:
-                            self.on_error("resume denied")
-                        return False
-                    offset = self._resume_offset
-                    if offset < 0 or offset > size:
-                        offset = 0
-                sent = offset
-                last_report = 0.0
-                with open(path, "rb") as handle:
-                    handle.seek(offset)
-                    while True:
-                        chunk = handle.read(1024 * 128)
-                        if not chunk:
-                            break
-                        self.sock.sendall(chunk)
-                        sent += len(chunk)
-                        # Sender progress was the bug: it reported every
-                        # 128KB chunk, while the receiver reports at most
-                        # every 0.1s. The UI computes speed from the time
-                        # between UI callbacks, and call_from_thread lets
-                        # the sender run ahead and queue a burst of
-                        # callbacks that the UI then processes almost
-                        # instantly, so bytes / tiny time = 4-5x speed.
-                        # Throttle the sender exactly like the receiver:
-                        # at most every 0.1s, plus always on the final
-                        # chunk, so the UI time between reports is real
-                        # network time, not queue-processing time.
-                        # Progress starts at the resume offset, so the
-                        # UI shows total progress, not just this attempt.
-                        now = time.monotonic()
-                        if on_progress is not None and (now - last_report >= 0.1 or sent >= size):
-                            last_report = now
-                            on_progress(path.name, sent, size)
-            except Exception as exc:
-                if self.on_error is not None:
-                    self.on_error(f"send failed: {exc}")
-                if header_sent:
-                    self._record_pending(path, size, digest_hex)
-                return False
-        # The send completed: the transfer is no longer pending.
-        self._clear_pending(path, size, digest_hex)
-        return True
+                    return False
+            # The send completed: the transfer is no longer pending.
+            self._clear_pending(path, size, digest_hex)
+            return True
+        finally:
+            self._sending_name = None
 
 
     def request_download(self, name: str, request_id: str = "") -> bool:
@@ -442,14 +668,54 @@ class Session:
     def _reader(self) -> None:
         try:
             while self._running:
-                raw_len = _recv_exact(self.sock, 4)
-                (length,) = struct.unpack(">I", raw_len)
-                if length <= 0 or length > 1024 * 1024:
-                    raise ConnectionError("bad header length")
-                header = json.loads(_recv_exact(self.sock, length).decode())
+                # A framed message the receive path read ahead (its
+                # peek for a pending "cancel" after a payload) is
+                # dispatched before reading from the socket, so it
+                # is not lost. This is how a batch's next file
+                # header survives the peek.
+                if self._pending_headers:
+                    header = self._pending_headers.popleft()
+                else:
+                    raw_len = _recv_exact(self.sock, 4)
+                    (length,) = struct.unpack(">I", raw_len)
+                    if length <= 0 or length > 1024 * 1024:
+                        raise ConnectionError("bad header length")
+                    header = json.loads(_recv_exact(self.sock, length).decode())
                 kind = header.get("type")
                 if kind == "file":
                     self._receive_file(header)
+                elif kind == "cancel":
+                    # The peer cancelled a transfer. Only a cancel
+                    # for the file we are currently sending means
+                    # anything: the send loop pads zeros for the
+                    # remainder and sends "cancel_ack". A cancel
+                    # for a file we already finished sending, or
+                    # for a file we are receiving (the sender's
+                    # post-payload cancel, handled by the peek in
+                    # _receive_file), is ignored: completion stands.
+                    name = str(header.get("name", ""))
+                    if name and name == self._sending_name:
+                        self._peer_cancel_name = name
+                        self._peer_cancel_event.set()
+                elif kind == "cancel_ack":
+                    # The peer confirmed a cancel. Two uses: we are
+                    # the receiver, and the sender confirmed our
+                    # cancel, so the .part is deleted and the
+                    # transfer is reported as Cancelled; or we are
+                    # the sender, and the receiver confirmed the
+                    # cancel we sent, so the send loop's wait ends.
+                    name = str(header.get("name", ""))
+                    if name and name in self._cancelled_receives:
+                        part = self._cancelled_receives.pop(name)
+                        try:
+                            delete_part_and_sidecar(part)
+                        except Exception:
+                            pass
+                        if self.on_file_received is not None:
+                            self.on_file_received(name, False, "cancelled")
+                    elif name and name == self._sending_name:
+                        self._sending_outcome = ("cancel_ack", True)
+                        self._sending_outcome_event.set()
                 elif kind == "resume":
                     # The receiver's answer to a file header: the
                     # offset to resume from, 0 for a fresh transfer.
@@ -472,8 +738,18 @@ class Session:
                     if self.on_download_denied is not None:
                         self.on_download_denied(str(header.get("name", "")), str(header.get("id", "")))
                 elif kind == "ack":
+                    # The receiver's answer to a file. It is also
+                    # the outcome of a sender-initiated cancel: if
+                    # the receiver acked before our "cancel"
+                    # landed, completion stands, so the send loop's
+                    # wait ends with the ack. Only an ack for the
+                    # file currently being sent is recorded.
                     if self.on_ack is not None:
                         self.on_ack(header.get("name", ""), bool(header.get("ok")), header.get("reason", ""))
+                    name = str(header.get("name", ""))
+                    if name and name == self._sending_name:
+                        self._sending_outcome = ("ack", bool(header.get("ok")))
+                        self._sending_outcome_event.set()
                 elif kind == "ping":
                     # Reply, so both directions see traffic. No UI update.
                     try:
@@ -498,6 +774,17 @@ class Session:
                 self._notify_disconnect(f"session ended: {exc}")
         finally:
             self._running = False
+            # A receive cancelled locally that never got its
+            # "cancel_ack" (the peer died mid-cancel) still has
+            # its .part deleted: a cancelled receive is never
+            # resumable, even when the connection is lost first.
+            # The session is ending, so there is no UI report.
+            for part in list(self._cancelled_receives.values()):
+                try:
+                    delete_part_and_sidecar(part)
+                except Exception:
+                    pass
+            self._cancelled_receives.clear()
             self._ended.set()
 
     def _send_resume_reply(self, kind: str, name: str, offset: int = 0) -> None:
@@ -545,6 +832,45 @@ class Session:
             delete_part_and_sidecar(part)
             return 0
         return current
+
+    def _peek_cancel(self, name: str) -> bool:
+        """Peek for a pending "cancel" for the file just received.
+
+        Called after the payload is fully read, before the SHA
+        check, rename, and ack. Returns True when a "cancel" for
+        this file is pending: the .part is deleted, "cancel_ack"
+        is sent, the transfer is reported as Cancelled, and no
+        ack is sent, so cancel wins. Returns False when no cancel
+        is pending and the normal completion proceeds. A framed
+        message that is not a cancel for this file (for example,
+        the next file header of a batch) is queued for the reader,
+        so it is not lost. A cancel that has not landed yet when
+        this peeks is missed, and completion stands, which is the
+        race rule: the receiver acked before the cancel landed.
+        """
+        try:
+            ready, _, _ = select.select([self.sock], [], [], 0)
+        except Exception:
+            return False
+        if not ready:
+            return False
+        try:
+            header = _read_header(self.sock)
+        except Exception:
+            return False
+        if header.get("type") == "cancel" and str(header.get("name", "")) == name:
+            part = self.cwd / f"{name}.part"
+            try:
+                delete_part_and_sidecar(part)
+            except Exception:
+                pass
+            self._send_cancel_ack(name)
+            if self.on_file_received is not None:
+                self.on_file_received(name, False, "cancelled")
+            return True
+        # Not a cancel for this file: queue it for the reader.
+        self._pending_headers.append(header)
+        return False
 
     def _receive_file(self, header: dict) -> None:
         name = Path(str(header.get("name", ""))).name
@@ -597,6 +923,13 @@ class Session:
                 self._send_resume_reply("resume", name, offset)
             else:
                 self._send_resume_reply("resume", name, 0)
+        # This receive is the current one, so cancel_receive()
+        # knows there is a transfer to cancel. The flags are
+        # cleared so a stale cancel from an earlier receive cannot
+        # discard this one.
+        self._receiving_name = name
+        self._cancel_receive_requested.clear()
+        self._cancel_receive_name = None
         digest = hashlib.sha256()
         if offset > 0:
             # Hash the bytes already on disk, so the final SHA-256
@@ -610,14 +943,24 @@ class Session:
         remaining = size - offset
         received = 0
         last_report = 0.0
+        discarding = False
         try:
             with open(part, "ab" if offset > 0 else "wb") as dest:
                 while remaining > 0:
+                    # Local cancel: stop writing, discard the
+                    # remaining payload bytes. The sender pads the
+                    # rest with zeros, so exactly size bytes are
+                    # consumed and the next framed message is read
+                    # as a message. The .part is deleted when
+                    # "cancel_ack" arrives, not here.
+                    if self._cancel_receive_requested.is_set() and self._cancel_receive_name == name:
+                        discarding = True
                     chunk = self.sock.recv(min(1024 * 128, remaining))
                     if not chunk:
                         raise ConnectionError("session closed during file")
-                    dest.write(chunk)
-                    digest.update(chunk)
+                    if not discarding:
+                        dest.write(chunk)
+                        digest.update(chunk)
                     remaining -= len(chunk)
                     received += len(chunk)
                     # Receiver progress: report at most every 0.1s, plus
@@ -625,8 +968,10 @@ class Session:
                     # without flooding it on every 128KB chunk.
                     # Progress starts at the resume offset, so the UI
                     # shows total progress, not just this attempt.
+                    # While discarding, the UI shows "Cancelling…"
+                    # instead, so no progress is reported.
                     now = time.monotonic()
-                    if self.on_progress is not None and (now - last_report >= 0.1 or remaining == 0):
+                    if not discarding and self.on_progress is not None and (now - last_report >= 0.1 or remaining == 0):
                         last_report = now
                         try:
                             self.on_progress(name, offset + received, size)
@@ -637,12 +982,31 @@ class Session:
                 self.on_error(f"receive failed: {exc}")
             # The transfer can resume: keep the .part and record
             # it in the sidecar, so the next attempt picks it up.
+            # A receive cancelled locally is not an exception, so
+            # it never reaches here; it is handled below.
             try:
                 write_part_sidecar(part, self.peer_fingerprint, name, size, expected)
             except Exception:
                 pass
             if self.on_file_received is not None:
                 self.on_file_received(name, False, "incomplete, kept as .part")
+            self._receiving_name = None
+            return
+        if discarding:
+            # The local user cancelled this receive. Register it
+            # so the reader settles it when "cancel_ack" arrives:
+            # the .part is deleted and the transfer is reported as
+            # Cancelled. No SHA check, no rename, no ack. The
+            # session stays open for the next transfer.
+            self._cancelled_receives[name] = part
+            self._receiving_name = None
+            return
+        # The sender may have cancelled its own send: it padded
+        # the payload with zeros and sent "cancel" right after.
+        # Peek for it before the SHA check, rename, and ack, so a
+        # cancel that landed first wins and no ack is sent.
+        if self._peek_cancel(name):
+            self._receiving_name = None
             return
         ok = digest.hexdigest() == expected
         saved_name = name
@@ -725,6 +1089,7 @@ class Session:
             self.send_ack(name, False, "SHA-256 mismatch")
         else:
             self.send_ack(name, False, rename_reason or "rename failed")
+        self._receiving_name = None
 
 
     def close(self) -> None:

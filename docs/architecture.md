@@ -202,6 +202,8 @@ The length is the length of the JSON header only, not the file. The receiver rea
 | `download_ask` | Requester to peer | Request for a file. Carries `name` (absolute or peer-relative) and a request `id`. Nothing is sent yet. |
 | `download_denied` | Peer to requester | Download was denied. Nothing is sent. |
 | `ping` and `pong` | Either, every 10 s idle | Heartbeat, so NAT and firewall idle timeouts do not close a quiet session. TCP keepalive is also enabled. |
+| `cancel` | Either, during a transfer | Stop a transfer in progress. Carries `name`. The canceller and the other side both deliver exactly the declared number of payload bytes, so the next framed message is read as a message, not as file bytes. A cancelled receive deletes its `.part` and is never resumable; a cancelled send is never added to pending.json. |
+| `cancel_ack` | Either, after a cancel | Confirmation that the other side has stopped and the session is back at a message boundary. Carries `name`. The session stays open for the next transfer. |
 | `error` | Either | For example, "no such file" for a download request. |
 | `bye` | Either, on leave | Clean session close. |
 
@@ -238,6 +240,29 @@ Details:
 - Streaming after that. The file is sent in 128 KB chunks with `sendall`, so a multi-gigabyte file does not need multi-gigabyte RAM.
 - One transfer at a time. The send lock means a session sends one file at a time, in batch order. A batch is sequential, not parallel.
 - Progress throttling. Sender and receiver report progress at most every 0.1 seconds, plus always on the final chunk. Reporting on every chunk, as the sender originally did, lets the UI process a burst of callbacks almost instantly and compute speed 4 to 5 times too high, because speed is bytes divided by UI time, not network time. Transfer progress code also ignores updates less than 10 ms apart for speed, while still updating the progress bar.
+
+### Cancelling a transfer
+
+Either side can stop a transfer in progress without disconnecting the session. The file payload is a fixed-length byte stream after the file header, so one side cannot inject a message mid-payload; the other side would read it as file bytes and lose the message boundary. Instead, both sides drain to the next message boundary: they deliver exactly the declared number of payload bytes, then the cancel is exchanged as framed messages.
+
+Receiver-initiated cancel (the receiver taps Cancel while a file arrives):
+
+1. The receiver sends `cancel` and stops writing to disk. It keeps reading payload bytes and discards them until exactly `size` bytes are consumed. The UI shows Cancelling… during this drain.
+2. The sender notices the cancel between 128 KB chunks (the reader, the only thread that reads the socket, sets a flag the send loop polls). It stops reading the file, sends zero bytes for the remainder of the declared size (fast, no disk I/O), then sends `cancel_ack`.
+3. The receiver, having drained `size` bytes, reads the next framed message, expects `cancel_ack`, deletes the `.part` file, and records the transfer as Cancelled. Nothing is added to pending.json; any entry for that file is removed.
+
+Sender-initiated cancel (the sender taps Cancel while a file leaves):
+
+1. The sender stops reading the file, sends zero bytes for the remainder of the declared size, then sends `cancel` as the post-payload message.
+2. The receiver reads the full payload as normal, then before running the SHA-256 check, rename, and ack, it peeks for a pending framed message. If a `cancel` for this file is pending, it deletes the `.part`, records Cancelled, sends `cancel_ack`, and does not send `ack`.
+
+One terminal outcome per file. If the receiver already completed the file and sent `ack` before the cancel landed, completion stands: the sender treats a late `ack` for a file it tried to cancel as success, not as a cancel. If the receiver sees `cancel` before acking, cancel wins and any late `ack` is suppressed. A genuine connection loss follows the existing connection-lost flow, not this one.
+
+Rules for both directions:
+
+- A cancelled receive deletes the `.part` immediately and is never resumable. A cancelled send is never added to pending.json. Resume stays for connection-loss interrupts only.
+- After cancel settles, the session stays open and the next transfer works on the same connection.
+- There is no capability field in hello/hello_ok and no old-peer fallback. Both peers are expected to be new.
 
 ### Requesting a file
 

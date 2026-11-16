@@ -735,6 +735,19 @@ ProgressBar > .bar--bar {
     text-align: right;
     color: #71717A;
 }
+#progress_cancel_row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin: 1 0 0 0;
+    padding: 0;
+    display: none;
+}
+#progress_cancel_row Button {
+    width: auto;
+    height: 3;
+    min-width: 18;
+}
 #session_scroll {
     layer: base;
 }

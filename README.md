@@ -26,6 +26,7 @@ The name comes from Minecraft. Riptide is the trident enchantment that launches 
 - Live progress with speed, transferred total, remaining size, and ETA, on sender and receiver.
 - Hash verification. Each file is SHA-256 hashed before sending, written as `.part` on receipt, and renamed only if the hash matches.
 - Resume interrupted transfers. If a transfer is interrupted, the sender re-sends it automatically when the same peer reconnects, and the receiver continues from where it stopped, after you allow the resume. Deny deletes the partial file. A partial file is also deleted if you connect to a different peer, or after 1 day.
+- Cancel a transfer without disconnecting. The Cancel button stops the current file in either direction; the partial file is deleted and never resumed, and the session stays open for the next transfer.
 - TLS encryption for headers and file bytes, with per-machine self-signed certificates.
 - Fingerprint approval. First connection to a peer shows its certificate fingerprint for approval. A changed fingerprint later aborts the session.
 - Public address display on Create Server.

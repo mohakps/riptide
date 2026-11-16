@@ -172,6 +172,13 @@ class SessionScreen(Screen):
         self._deny_resume_btn: Button | None = None
         self._transfer_active: bool = False
         self._progress_visible: bool = False
+        # The file currently being sent or received, and which
+        # direction, so the Cancel button knows what to cancel.
+        # Set by _on_progress (which runs for both directions),
+        # cleared when the transfer finishes or is cancelled.
+        self._active_transfer_name: str | None = None
+        self._active_transfer_direction: str | None = None
+        self._cancel_btn: Button | None = None
         self._complete_timer = None
         self._complete_message_kind: str | None = None
         self._received_files: list[str] = []
@@ -407,6 +414,10 @@ class SessionScreen(Screen):
                     Label("", id="progress_file_size"),
                     id="progress_file_row",
                 ),
+                Horizontal(
+                    Button("Cancel transfer", id="cancel_transfer", classes="deny"),
+                    id="progress_cancel_row",
+                ),
                 Static("", id="transfer_complete_message"),
                 id="progress_section",
             ),
@@ -488,6 +499,10 @@ class SessionScreen(Screen):
         try:
             self._approve_resume_btn = self.query_one("#approve_resume", Button)
             self._deny_resume_btn = self.query_one("#deny_resume", Button)
+        except Exception:
+            pass
+        try:
+            self._cancel_btn = self.query_one("#cancel_transfer", Button)
         except Exception:
             pass
         self._set_download_approval_visible(False)
@@ -597,11 +612,17 @@ class SessionScreen(Screen):
                 self.query_one("#bar", ProgressBar).styles.display = "block"
                 self.query_one("#progress_metrics_row", Horizontal).styles.display = "block"
                 self.query_one("#progress_file_row", Horizontal).styles.display = "block"
+                # The Cancel button is shown only while a transfer
+                # is in progress, and is re-enabled for the new
+                # transfer (a previous tap disabled it).
+                self.query_one("#progress_cancel_row", Horizontal).styles.display = "block"
+                if self._cancel_btn is not None:
+                    self._cancel_btn.disabled = False
         except Exception:
             pass
         self._update_download_composer()
 
-    def _show_transfer_complete(self, sent_count: int, failed_count: int = 0) -> None:
+    def _show_transfer_complete(self, sent_count: int, failed_count: int = 0, cancelled_count: int = 0) -> None:
         # In place of the progress bar, at the bottom of the page:
         # the progress section stays visible, but the bar, metrics
         # and file row are hidden and only the green statement shows.
@@ -612,11 +633,15 @@ class SessionScreen(Screen):
             self.query_one("#bar", ProgressBar).styles.display = "none"
             self.query_one("#progress_metrics_row", Horizontal).styles.display = "none"
             self.query_one("#progress_file_row", Horizontal).styles.display = "none"
+            self.query_one("#progress_cancel_row", Horizontal).styles.display = "none"
             noun = "file" if sent_count == 1 else "files"
             text = f"Sent {sent_count} {noun} successfully."
             if failed_count:
                 failed_noun = "file" if failed_count == 1 else "files"
                 text = f"Sent {sent_count} {noun} successfully, {failed_count} {failed_noun} failed."
+            if cancelled_count:
+                cancelled_noun = "file" if cancelled_count == 1 else "files"
+                text = f"Sent {sent_count} {noun} successfully, {cancelled_count} {cancelled_noun} cancelled."
             msg = self.query_one("#transfer_complete_message", Static)
             msg.update(text)
             msg.styles.display = "block"
@@ -644,6 +669,7 @@ class SessionScreen(Screen):
             self.query_one("#bar", ProgressBar).styles.display = "none"
             self.query_one("#progress_metrics_row", Horizontal).styles.display = "none"
             self.query_one("#progress_file_row", Horizontal).styles.display = "none"
+            self.query_one("#progress_cancel_row", Horizontal).styles.display = "none"
             content_width = self._content_width()
             if len(self._received_files) == 1:
                 # 'Received file "' + '" successfully.' = 30 chars
@@ -755,6 +781,15 @@ class SessionScreen(Screen):
 
     def _on_received(self, name: str, ok: bool, reason: str) -> None:
         self._set_progress_visible(False)
+        if reason == "cancelled":
+            # A cancelled receive is not a failure and not a
+            # received file: the .part was deleted, the session
+            # stays open, and the file is not listed as received.
+            self._active_transfer_name = None
+            self._active_transfer_direction = None
+            self._set_status(f"Cancelled {name}")
+            self._refresh_browser()
+            return
         self._set_status(f"Received {name}: {'verified' if ok else 'FAILED ' + reason}")
         self._refresh_browser()
         if not ok:
@@ -783,6 +818,10 @@ class SessionScreen(Screen):
         direction: str,
     ) -> None:
         self._set_progress_visible(True)
+        # The transfer in progress, so the Cancel button knows
+        # what to cancel. _on_progress runs for both directions.
+        self._active_transfer_name = name
+        self._active_transfer_direction = direction
         if self._overall_transfer.total != batch_total:
             self._overall_transfer = TransferProgress(batch_total)
         self._overall_transfer.update(batch_sent)
@@ -892,6 +931,8 @@ class SessionScreen(Screen):
             self._answer_resume(True)
         elif event.button.id == "deny_resume":
             self._answer_resume(False)
+        elif event.button.id == "cancel_transfer":
+            self._cancel_transfer()
         elif event.button.id == "leave":
             self._leave_session()
 
@@ -957,6 +998,32 @@ class SessionScreen(Screen):
         self._set_resume_visible(False)
         self._set_status(f"{'Resuming' if allow else 'Resume denied for'} {self._resume_name}")
 
+    def _cancel_transfer(self) -> None:
+        """Cancel the transfer in progress, keep the session open.
+
+        The Cancel button is only shown while a transfer is in
+        progress. It cancels the current file (send or receive)
+        by draining to the next message boundary, never by
+        closing the socket, so the session stays open for the
+        next transfer. The button is disabled at once, so rapid
+        taps cannot cancel twice, and the status shows
+        "Cancelling…" until the cancel settles as "Cancelled".
+        """
+        name = self._active_transfer_name
+        direction = self._active_transfer_direction
+        if not name or not direction:
+            return
+        if self._cancel_btn is not None:
+            self._cancel_btn.disabled = True
+        self._set_status(f"Cancelling {name}…")
+        try:
+            if direction == "Sending":
+                self.session.cancel_send(name)
+            else:
+                self.session.cancel_receive(name)
+        except Exception:
+            pass
+
     def _auto_resume_pending(self) -> None:
         """Re-send pending interrupted transfers on rejoin.
 
@@ -1001,7 +1068,15 @@ class SessionScreen(Screen):
                     )
 
                 ok = self.session.send_file(path, on_progress=on_file_prog)
-                self.app.call_from_thread(self._finish_send, 1 if ok else 0, 0 if ok else 1)
+                if ok:
+                    self.app.call_from_thread(self._finish_send, 1, 0, 0)
+                elif getattr(self.session, "last_cancelled_send", None) == path.name:
+                    # Cancelled, not failed: the user stopped the
+                    # auto-resume, and it is never resumed.
+                    self.app.call_from_thread(self._set_status, f"Cancelled {path.name}")
+                    self.app.call_from_thread(self._finish_send, 0, 0, 1)
+                else:
+                    self.app.call_from_thread(self._finish_send, 0, 1, 0)
                 if not ok:
                     return
 
@@ -1040,6 +1115,7 @@ class SessionScreen(Screen):
             completed_bytes = 0
             sent_count = 0
             failed_count = 0
+            cancelled_count = 0
             for path in files:
                 file_size = path.stat().st_size if path.is_file() else 0
                 self.app.call_from_thread(self._set_status, f"Sending {path.name}...")
@@ -1054,20 +1130,28 @@ class SessionScreen(Screen):
                 completed_bytes += file_size
                 if ok:
                     sent_count += 1
+                elif getattr(self.session, "last_cancelled_send", None) == path.name:
+                    # Cancelled, not failed: the transfer was
+                    # stopped by the user and is never resumed.
+                    cancelled_count += 1
                 else:
                     failed_count += 1
-                self.app.call_from_thread(
-                    self._set_status,
-                    f"Sent {path.name}" if ok else f"Failed to send {path.name}",
-                )
-            self.app.call_from_thread(self._finish_send, sent_count, failed_count)
+                if ok:
+                    self.app.call_from_thread(self._set_status, f"Sent {path.name}")
+                elif getattr(self.session, "last_cancelled_send", None) == path.name:
+                    self.app.call_from_thread(self._set_status, f"Cancelled {path.name}")
+                else:
+                    self.app.call_from_thread(self._set_status, f"Failed to send {path.name}")
+            self.app.call_from_thread(self._finish_send, sent_count, failed_count, cancelled_count)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_send(self, sent_count: int, failed_count: int) -> None:
+    def _finish_send(self, sent_count: int, failed_count: int, cancelled_count: int = 0) -> None:
         self._transfer_active = False
         self._progress_visible = False
-        self._show_transfer_complete(sent_count, failed_count)
+        self._active_transfer_name = None
+        self._active_transfer_direction = None
+        self._show_transfer_complete(sent_count, failed_count, cancelled_count)
         self._update_download_composer()
     def _download(self, name: str) -> None:
         name = _strip_surrounding_quotes(name)
